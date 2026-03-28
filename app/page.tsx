@@ -1,65 +1,108 @@
-import Image from "next/image";
-
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <style>{`
+        .landing-root {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: var(--background);
+          padding: 2rem;
+          text-align: center;
+          gap: 1.5rem;
+        }
+        .landing-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.375rem 1rem;
+          border-radius: 999px;
+          background: var(--accent-subtle);
+          border: 1px solid var(--accent);
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--accent);
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+        .landing-h1 {
+          font-size: clamp(2rem, 6vw, 4rem);
+          font-weight: 800;
+          line-height: 1.1;
+          color: var(--foreground);
+          max-width: 700px;
+          margin: 0;
+        }
+        .landing-accent { color: var(--accent); }
+        .landing-sub {
+          font-size: 1.125rem;
+          color: var(--muted);
+          max-width: 520px;
+          line-height: 1.7;
+          margin: 0;
+        }
+        .landing-actions {
+          display: flex;
+          gap: 1rem;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+        .btn-primary {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.75rem 2rem;
+          border-radius: 0.5rem;
+          background: var(--accent);
+          color: #fff;
+          font-weight: 600;
+          font-size: 1rem;
+          text-decoration: none;
+          transition: background 0.15s;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0.75rem 2rem;
+          border-radius: 0.5rem;
+          background: var(--surface-2);
+          color: var(--foreground);
+          font-weight: 600;
+          font-size: 1rem;
+          text-decoration: none;
+          border: 1px solid var(--border);
+          transition: background 0.15s;
+        }
+        .btn-secondary:hover { background: var(--surface); }
+      `}</style>
+      <main className="landing-root">
+        <div className="landing-badge">
+          Meeting Intelligence · Powered by Gemini
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
+
+        <h1 className="landing-h1">
+          Turn transcripts into{" "}
+          <span className="landing-accent">actionable insights</span>
+        </h1>
+
+        <p className="landing-sub">
+          Minuta extracts decisions, action items, and sentiment from your
+          meeting transcripts — automatically. Never miss a follow-up again.
+        </p>
+
+        <div className="landing-actions">
+          <a href="/signup" id="cta-signup" className="btn-primary">
+            Get started free
           </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
+          <a href="/login" id="cta-login" className="btn-secondary">
+            Sign in
           </a>
         </div>
       </main>
-    </div>
+    </>
   );
 }
