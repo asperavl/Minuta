@@ -7,6 +7,7 @@ type Project = {
   id: string;
   name: string;
   created_at: string;
+  meeting_count?: number;
 };
 
 type User = {
@@ -34,11 +35,30 @@ export default function DashboardPage() {
     setUser(user ?? null);
 
     if (user) {
-      const { data } = await supabase
+      const { data: projectRows } = await supabase
         .from("projects")
         .select("id, name, created_at")
         .order("created_at", { ascending: false });
-      setProjects(data ?? []);
+
+      if (projectRows && projectRows.length > 0) {
+        // Fetch meeting counts for all projects in one query
+        const projectIds = projectRows.map((p) => p.id);
+        const { data: meetingCounts } = await supabase
+          .from("meetings")
+          .select("project_id")
+          .in("project_id", projectIds);
+
+        const countMap: Record<string, number> = {};
+        for (const m of meetingCounts ?? []) {
+          countMap[m.project_id] = (countMap[m.project_id] ?? 0) + 1;
+        }
+
+        setProjects(
+          projectRows.map((p) => ({ ...p, meeting_count: countMap[p.id] ?? 0 }))
+        );
+      } else {
+        setProjects([]);
+      }
     }
     setLoading(false);
   }, [supabase]);
@@ -67,18 +87,18 @@ export default function DashboardPage() {
       return;
     }
 
-    const { error } = await supabase.from("projects").insert({
-      name: newProjectName.trim(),
-      owner_id: user.id,
-    });
+    const { data: newProject, error } = await supabase
+      .from("projects")
+      .insert({ name: newProjectName.trim(), owner_id: user.id })
+      .select("id")
+      .single();
 
     setCreating(false);
-    if (error) {
-      setCreateError(error.message);
+    if (error || !newProject) {
+      setCreateError(error?.message ?? "Failed to create project.");
     } else {
-      setNewProjectName("");
-      setShowModal(false);
-      fetchData();
+      // Redirect straight into the new project
+      window.location.href = `/projects/${newProject.id}`;
     }
   }
 
@@ -452,6 +472,8 @@ function ProjectCard({
     year: "numeric",
   });
 
+  const meetingCount = project.meeting_count ?? 0;
+
   return (
     <div
       style={{
@@ -461,14 +483,13 @@ function ProjectCard({
         padding: "1.25rem 1.5rem",
         display: "flex",
         flexDirection: "column",
-        gap: "0.75rem",
+        gap: "0.875rem",
         transition: "border-color 0.15s, transform 0.15s",
-        cursor: "pointer",
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLDivElement;
         el.style.borderColor = "var(--accent)";
-        el.style.transform = "translateY(-1px)";
+        el.style.transform = "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLDivElement;
@@ -476,6 +497,7 @@ function ProjectCard({
         el.style.transform = "translateY(0)";
       }}
     >
+      {/* Top row: icon + delete */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem" }}>
         <div
           style={{
@@ -521,6 +543,7 @@ function ProjectCard({
         </button>
       </div>
 
+      {/* Project name + date */}
       <div>
         <div
           style={{
@@ -536,6 +559,52 @@ function ProjectCard({
         <div style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>
           Created {date}
         </div>
+      </div>
+
+      {/* Meeting count + View Project CTA */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--border)",
+        }}
+      >
+        <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>
+          {meetingCount === 0
+            ? "No meetings"
+            : `${meetingCount} meeting${meetingCount !== 1 ? "s" : ""}`}
+        </span>
+        <a
+          id={`btn-view-project-${project.id}`}
+          href={`/projects/${project.id}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.25rem",
+            padding: "0.3125rem 0.75rem",
+            borderRadius: "0.375rem",
+            background: "var(--accent)",
+            color: "#fff",
+            fontSize: "0.8125rem",
+            fontWeight: 600,
+            textDecoration: "none",
+            transition: "background 0.15s",
+          }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "var(--accent-hover)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "var(--accent)")
+          }
+        >
+          View Project
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
       </div>
     </div>
   );
