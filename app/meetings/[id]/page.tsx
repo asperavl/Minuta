@@ -6,6 +6,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import JSZip from "jszip";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import ActionItemsTable from "@/components/ActionItemsTable";
 import SentimentDashboard from "@/components/SentimentDashboard";
 import TopicTimeline from "@/components/TopicTimeline";
@@ -76,7 +78,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
   const [isChatOpen, setIsChatOpen] = useState(false);
 
   async function deleteMeeting() {
-    if (!meeting || !window.confirm("Are you sure you want to delete this meeting? This cannot be undone.")) return;
+    if (!meeting) return;
     setDeleting(true);
     try {
       const resp = await fetch(`/api/meetings/${meeting.id}`, { method: "DELETE" });
@@ -86,7 +88,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
       }
       window.location.href = `/projects/${meeting.project_id}`;
     } catch (err: any) {
-      alert(err.message || "Failed to delete meeting.");
+      toast.error(err.message || "Failed to delete meeting.");
       setDeleting(false);
     }
   }
@@ -644,28 +646,39 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => void deleteMeeting()}
-            disabled={deleting}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: deleting ? "not-allowed" : "pointer",
-              color: "var(--danger)",
-              padding: "0.38rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: "0.4rem",
-              transition: "all 0.15s",
-              opacity: deleting ? 0.5 : 1,
-              marginRight: "0.4rem",
-            }}
-            title="Delete Meeting"
-          >
-            <TrashIcon />
-          </button>
+          <AlertDialog>
+            <AlertDialogTrigger render={<button
+                type="button"
+                disabled={deleting}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: deleting ? "not-allowed" : "pointer",
+                  color: "var(--danger)",
+                  padding: "0.38rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "0.4rem",
+                  transition: "all 0.15s",
+                  opacity: deleting ? 0.5 : 1,
+                  marginRight: "0.4rem",
+                }}
+                title="Delete Meeting"
+              >
+                <TrashIcon />
+              </button>} />
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Meeting</AlertDialogTitle>
+                <AlertDialogDescription>Are you sure you want to delete this meeting? This cannot be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void deleteMeeting()} className="bg-red-500 hover:bg-red-600 text-white">Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <button
             type="button"
             onClick={() => void exportCsv()}

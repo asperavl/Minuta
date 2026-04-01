@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 type Meeting = {
   id: string;
@@ -259,45 +260,59 @@ export default function MeetingCard({ meeting, onStatusChange, onDelete }: Meeti
       </a>
       
       {onDelete && (
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (window.confirm("Are you sure you want to delete this meeting? This cannot be undone.")) {
-              setDeleting(true);
-              onDelete();
-            }
-          }}
-          disabled={deleting}
-          style={{
-            position: "absolute",
-            top: "1.25rem",
-            right: "1.25rem",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--muted)",
-            padding: "0.25rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "0.4rem",
-            zIndex: 2,
-            transition: "all 0.15s",
-            opacity: deleting ? 0.5 : 1,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = "var(--danger)";
-            e.currentTarget.style.background = "rgba(226,75,74,0.12)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = "var(--muted)";
-            e.currentTarget.style.background = "none";
-          }}
-          title="Delete Meeting"
-        >
-          <TrashIcon />
-        </button>
+        <AlertDialog>
+          <AlertDialogTrigger render={<button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              disabled={deleting}
+              style={{
+                position: "absolute",
+                top: "1.25rem",
+                right: "1.25rem",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--muted)",
+                padding: "0.25rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "0.4rem",
+                zIndex: 2,
+                transition: "all 0.15s",
+                opacity: deleting ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--danger)";
+                e.currentTarget.style.background = "rgba(226,75,74,0.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--muted)";
+                e.currentTarget.style.background = "none";
+              }}
+              title="Delete Meeting"
+            >
+              <TrashIcon />
+            </button>} />
+          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Meeting</AlertDialogTitle>
+              <AlertDialogDescription>Are you sure you want to delete this meeting? This cannot be undone.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleting(true);
+                  onDelete();
+                }} 
+                className="bg-red-500 hover:bg-red-600 text-white"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   );

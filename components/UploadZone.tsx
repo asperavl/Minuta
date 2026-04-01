@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 // ── Stage metadata ──────────────────────────────────────────────────────────
 
@@ -413,7 +414,6 @@ export function ProcessingCard({
   const isProcessing = meeting.status === "processing";
 
   async function handleDelete() {
-    if (!confirm("Delete this meeting? This cannot be undone.")) return;
     setDeleting(true);
     await onDelete();
   }
@@ -446,13 +446,24 @@ export function ProcessingCard({
 
         {meeting.status === "failed" && (
           <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", background: "transparent", color: deleting ? "var(--muted)" : "var(--danger)", fontSize: "0.8125rem", fontWeight: 500, border: "1px solid rgba(248,113,113,0.4)", cursor: deleting ? "not-allowed" : "pointer", opacity: deleting ? 0.6 : 1 }}
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger render={<button
+                  disabled={deleting}
+                  style={{ padding: "0.375rem 0.75rem", borderRadius: "0.5rem", background: "transparent", color: deleting ? "var(--muted)" : "var(--danger)", fontSize: "0.8125rem", fontWeight: 500, border: "1px solid rgba(248,113,113,0.4)", cursor: deleting ? "not-allowed" : "pointer", opacity: deleting ? 0.6 : 1 }}
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </button>} />
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete meeting?</AlertDialogTitle>
+                  <AlertDialogDescription>This action cannot be undone. Are you sure you want to delete this meeting?</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete} className="bg-red-500 hover:bg-red-600 text-white">Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <button
               onClick={onRetry}
               style={{ padding: "0.375rem 0.875rem", borderRadius: "0.5rem", background: "var(--accent)", color: "#fff", fontSize: "0.8125rem", fontWeight: 600, border: "none", cursor: "pointer", transition: "background 0.15s" }}

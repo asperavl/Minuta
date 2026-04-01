@@ -15,35 +15,46 @@
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #f87171;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* App Original Theme Variables */
+  --background: #0f0f13;
+  --surface: #18181f;
+  --surface-2: #222230;
+  --border: #2e2e3d;
+  --foreground: #f0f0f5;
+  --muted-app: #8888a4; /* Keeping original as a fallback if needed, but redefining --muted */
+  --muted: #8888a4;
+  --accent: #7c6ff7;
+  --accent-hover: #6a5ee0;
+  --accent-subtle: rgba(124, 111, 247, 0.12);
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+
+  /* Shadcn Merged Dark Theme (Modified heavily to match app) */
+  --card: #18181f;
+  --card-foreground: #f0f0f5;
+  --popover: #222230;
+  --popover-foreground: #f0f0f5;
+  
+  --primary: #7c6ff7; /* Using app accent for primary buttons */
+  --primary-foreground: #ffffff;
+  
+  --secondary: #2e2e3d;
+  --secondary-foreground: #f0f0f5;
+  
+  --muted-foreground: #8888a4;
+  --accent-foreground: #ffffff;
+  
+  --destructive: #f87171;
+  --ring: #7c6ff7;
+  --radius: 0.625rem;
+  
+  /* Fallback charts from shadcn dark */
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 }
 
 @theme inline {

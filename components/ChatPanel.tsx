@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 export type ChatPanelProps = {
   projectId: string;
@@ -170,7 +171,6 @@ export default function ChatPanel({
   };
 
   const clearChat = async () => {
-    if (!confirm("Are you sure you want to clear the conversation history?")) return;
     setMessages([]);
     let query = supabase.from("chat_messages").delete().eq("project_id", projectId);
     if (meetingId) {
@@ -219,23 +219,34 @@ export default function ChatPanel({
         </div>
         <div style={{ display: "flex", gap: "0.5rem" }}>
           {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: "0.4rem",
-                color: "var(--muted)",
-                fontSize: "1rem",
-                display: "flex",
-                alignItems: "center",
-              }}
-              aria-label="Clear chat"
-              title="Clear chat"
-            >
-              ⎚
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger render={<button
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "0.4rem",
+                    color: "var(--muted)",
+                    fontSize: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                  aria-label="Clear chat"
+                  title="Clear chat"
+                >
+                  ⎚
+                </button>} />
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Clear Chat</AlertDialogTitle>
+                  <AlertDialogDescription>Are you sure you want to clear the conversation history?</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={clearChat} className="bg-red-500 hover:bg-red-600 text-white">Clear</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
           <button
             onClick={onClose}

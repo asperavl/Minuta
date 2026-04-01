@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 type Project = {
   id: string;
@@ -103,7 +104,6 @@ export default function DashboardPage() {
   }
 
   async function handleDeleteProject(projectId: string) {
-    if (!confirm("Delete this project and all its meetings? This cannot be undone.")) return;
     setDeletingId(projectId);
     await supabase.from("projects").delete().eq("id", projectId);
     setDeletingId(null);
@@ -513,34 +513,45 @@ function ProjectCard({
         >
           <FolderIcon />
         </div>
-        <button
-          aria-label={`Delete project ${project.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          disabled={deleting}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: deleting ? "not-allowed" : "pointer",
-            color: "var(--muted)",
-            padding: "0.25rem",
-            borderRadius: "0.25rem",
-            display: "flex",
-            alignItems: "center",
-            opacity: deleting ? 0.5 : 1,
-            transition: "color 0.15s",
-          }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.color = "var(--danger)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.color = "var(--muted)")
-          }
-        >
-          <TrashIcon />
-        </button>
+        <AlertDialog>
+          <AlertDialogTrigger render={<button
+              aria-label={`Delete project ${project.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+              disabled={deleting}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: deleting ? "not-allowed" : "pointer",
+                color: "var(--muted)",
+                padding: "0.25rem",
+                borderRadius: "0.25rem",
+                display: "flex",
+                alignItems: "center",
+                opacity: deleting ? 0.5 : 1,
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.color = "var(--danger)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.color = "var(--muted)")
+              }
+            >
+              <TrashIcon />
+            </button>} />
+          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Project</AlertDialogTitle>
+              <AlertDialogDescription>Are you sure you want to delete this project and all its meetings? This cannot be undone.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.stopPropagation(); onDelete(); }} className="bg-red-500 hover:bg-red-600 text-white">Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Project name + date */}
