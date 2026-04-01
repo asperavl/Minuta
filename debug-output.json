@@ -1,0 +1,29 @@
+{
+  "error": null,
+  "data": [
+    {
+      "file_name": "test_meeting_2.txt",
+      "processing_stage": "merging",
+      "processing_status": "failed",
+      "processing_error": "new row for relation \"extractions\" violates check constraint \"extractions_urgency_check\""
+    },
+    {
+      "file_name": "test_meeting.txt",
+      "processing_stage": "merging",
+      "processing_status": "failed",
+      "processing_error": "new row for relation \"extractions\" violates check constraint \"extractions_urgency_check\""
+    },
+    {
+      "file_name": "test_meeting_2.txt",
+      "processing_stage": null,
+      "processing_status": "complete",
+      "processing_error": null
+    },
+    {
+      "file_name": "test_meeting.txt",
+      "processing_stage": null,
+      "processing_status": "complete",
+      "processing_error": null
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+<thought_process>
+To address the given problem, we first need to evaluate the existing issues and the extracted topics to determine if any new issues should be created or if the existing issues should be updated. 
+
+The existing issues are:
+1. API Delay Issue
+2. Onboarding Flow Issue
+
+The extracted topics are:
+1. API Integration - This topic is resolved and does not require a new issue.
+2. Dashboard Mockups - This topic is resolved and does not require a new issue.
+3. Onboarding Email Verification - This topic is related to the Onboarding Flow Issue and should be linked to the existing issue.
+4. Engineering Wiki - This topic is resolved and does not require a new issue.
+5. Performance Issue - This topic is a new issue that needs to be created.
+6. Cross-Meeting Analytics - This topic is a new feature request and should be created as a new issue.
+
+The extracted workflow tasks are action items that should be linked to the existing or new issues.
+
+Based on the evaluation, we will create two new issues: Performance Issue and Cross-Meeting Analytics. We will also update the Onboarding Flow Issue to reflect the discussion on the onboarding email verification step.
+
+</thought_process>
+
+```json
+{
+  "matches": [
+    {
+      "extraction_id": "topic-3",
+      "issue_id": null,
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "resolved",
+      "new_status": "resolved",
+      "context": "The engineering wiki topic was discussed and resolved.",
+      "supporting_quote": null
+    },
+    {
+      "extraction_id": "topic-0",
+      "issue_id": "eccdf9a0-ec3e-4717-a376-30eb3998c5a3",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "resolved",
+      "new_status": "resolved",
+      "context": "The API integration topic was discussed and resolved.",
+      "supporting_quote": null
+    },
+    {
+      "extraction_id": "topic-1",
+      "issue_id": null,
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "resolved",
+      "new_status": "resolved",
+      "context": "The dashboard mockups topic was discussed and resolved.",
+      "supporting_quote": null
+    },
+    {
+      "extraction_id": "topic-2",
+      "issue_id": "dbdc5c12-f379-42c2-889f-e0c233c76366",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "The onboarding email verification step is still confusing users.",
+      "supporting_quote": "The team discussed the onboarding email verification step, which is still confusing users."
+    },
+    {
+      "extraction_id": "topic-4",
+      "issue_id": null,
+      "is_new_issue": true,
+      "new_issue_title": "Performance Issue",
+      "new_issue_description": "The team discussed a performance issue with the dashboard load time, which is currently around four seconds on a cold load.",
+      "mention_type": "raised",
+      "new_status": "open",
+      "context": "The performance issue with the dashboard load time needs to be fixed.",
+      "supporting_quote": "The team discussed a performance issue with the dashboard load time, which is currently around four seconds on a cold load."
+    },
+    {
+      "extraction_id": "topic-5",
+      "issue_id": null,
+      "is_new_issue": true,
+      "new_issue_title": "Cross-Meeting Analytics",
+      "new_issue_description": "The team discussed a new feature request for cross-meeting analytics, which was not in the original scope.",
+      "mention_type": "raised",
+      "new_status": "open",
+      "context": "The client wants to see cross-meeting analytics before the demo.",
+      "supporting_quote": "The team discussed a new feature request for cross-meeting analytics, which was not in the original scope."
+    },
+    {
+      "extraction_id": "569186d3-048c-4fab-ad37-9b9585a375e4",
+      "issue_id": "dbdc5c12-f379-42c2-889f-e0c233c76366",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "The onboarding email verification copy changes need to be implemented.",
+      "supporting_quote": "Implement onboarding email verification copy changes"
+    },
+    {
+      "extraction_id": "f78ae2e8-e2f7-4650-935b-778b49958937",
+      "issue_id": "performance_issue_id",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "The performance issue with the dashboard load time needs to be investigated and fixed.",
+      "supporting_quote": "Investigate and profile queries to fix performance issue"
+    },
+    {
+      "extraction_id": "3c3ed0ec-c9ac-4919-9798-afc60b7555c3",
+      "issue_id": "performance_issue_id",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "A fallback demo script needs to be prepared in case the performance issue is not fixed.",
+      "supporting_quote": "Prepare fallback demo script"
+    },
+    {
+      "extraction_id": "de126b21-97ae-4efe-8f21-8deba0cee6f0",
+      "issue_id": "dbdc5c12-f379-42c2-889f-e0c233c76366",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "A 24-hour reminder email needs to be drafted.",
+      "supporting_quote": "Draft email template for 24-hour reminder"
+    },
+    {
+      "extraction_id": "1d4e4529-310d-48c3-b63a-432dabd2d1d0",
+      "issue_id": "cross_meeting_analytics_id",
+      "is_new_issue": false,
+      "new_issue_title": null,
+      "new_issue_description": null,
+      "mention_type": "discussed",
+      "new_status": "open",
+      "context": "A static mockup of the cross-meeting analytics screen needs to be created.",
+      "supporting_quote": "Create static mockup of cross-meeting analytics screen"
+    }
+  ]
+}
+```

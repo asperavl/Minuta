@@ -7,8 +7,11 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
 
 export async function geminiPrompt(prompt: string): Promise<string> {
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash-002',
     contents: prompt,
+    config: {
+      temperature: 0,
+    },
   })
   return response.text ?? ''
 }

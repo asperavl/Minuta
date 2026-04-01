@@ -15,35 +15,41 @@ const STAGES = [
   { key: "reconciling",         label: "Reconciling issues",            pct: 95 },
 ] as const;
 
-type StageKey = (typeof STAGES)[number]["key"];
 
-function getStageInfo(stage: StageKey | null | undefined): { label: string; pct: number } {
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export type StageKey = (typeof STAGES)[number]["key"];
+
+export function getStageInfo(stage: StageKey | null | undefined): { label: string; pct: number } {
   const found = STAGES.find((s) => s.key === stage);
   return found ?? { label: "Starting analysis...", pct: 5 };
 }
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
-type StagedFile = {
+export type StagedFile = {
   id: string;
   file: File;
   queued?: boolean; // waiting in Analyze All queue
   error?: string;
+  intendedSortOrder?: number;
 };
 
-type UploadedMeeting = {
+export type UploadedMeeting = {
   meetingId: string;
   fileName: string;
   status: "processing" | "complete" | "failed";
   stage?: StageKey | null;
+  processingError?: string | null;
   wordCount?: number;
   speakers?: string[];
+  sort_order?: number;
 };
 
-type UploadZoneProps = {
+export type UploadZoneProps = {
   projectId: string;
   onMeetingReady?: (meetingId: string) => void;
+  onFilesDropped?: (files: File[]) => void;
 };
+
 
 // ── Component ───────────────────────────────────────────────────────────────
 
@@ -56,8 +62,9 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
   const pollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   useEffect(() => {
+    const intervals = pollingRef.current;
     return () => {
-      pollingRef.current.forEach((iv) => clearInterval(iv));
+      intervals.forEach((iv) => clearInterval(iv));
     };
   }, []);
 
@@ -69,6 +76,7 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
         setGlobalError("Unsupported format. Please upload .txt or .vtt files only.");
         return;
       }
+      
       setStaged((prev) => [
         ...prev,
         ...acceptedFiles.map((file) => ({
@@ -126,11 +134,7 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
         ...prev,
       ]);
 
-      // Trigger Edge Function from browser (session JWT)
-      supabase.functions
-        .invoke("process-transcript", { body: { meetingId } })
-        .catch((err) => console.error("[UploadZone] Edge Function trigger failed:", err));
-
+      // Edge Function is triggered reliably by the server-side /api/upload route
       // Wait for completion (used by Analyze All queue)
       await waitForCompletion(meetingId);
     } catch (err: unknown) {
@@ -149,7 +153,7 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
       const interval = setInterval(async () => {
         const { data } = await supabase
           .from("meetings")
-          .select("processing_status, processing_stage")
+          .select("processing_status, processing_stage, processing_error")
           .eq("id", meetingId)
           .single();
 
@@ -159,7 +163,11 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
         const stage = data.processing_stage as StageKey | null;
 
         setMeetings((prev) =>
-          prev.map((m) => (m.meetingId === meetingId ? { ...m, status, stage } : m))
+          prev.map((m) =>
+            m.meetingId === meetingId
+              ? { ...m, status, stage, processingError: data.processing_error ?? null }
+              : m
+          )
         );
 
         if (status === "complete" || status === "failed") {
@@ -320,7 +328,7 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
 
 // ── Staged card ──────────────────────────────────────────────────────────────
 
-function StagedCard({
+export function StagedCard({
   staged,
   onAnalyze,
   onRemove,
@@ -352,8 +360,14 @@ function StagedCard({
         <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {staged.file.name}
         </div>
-        <div style={{ fontSize: "0.78125rem", color: staged.error ? "var(--danger)" : "var(--muted)", marginTop: "0.125rem" }}>
-          {staged.error ? staged.error : staged.queued ? "Queued..." : `${sizeKb} KB - ready to analyze`}
+        <div style={{ fontSize: "0.78125rem", color: staged.error ? "var(--danger)" : "var(--muted)", marginTop: "0.125rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          {staged.error ? (
+            <span>{staged.error}</span>
+          ) : staged.queued ? (
+            <span>Queued...</span>
+          ) : (
+            <span>{sizeKb} KB</span>
+          )}
         </div>
       </div>
 
@@ -385,7 +399,7 @@ function StagedCard({
 
 // ── Processing / failed card with real progress bar ──────────────────────────
 
-function ProcessingCard({
+export function ProcessingCard({
   meeting,
   onRetry,
   onDelete,
@@ -450,6 +464,24 @@ function ProcessingCard({
           </div>
         )}
       </div>
+
+      {meeting.status === "failed" && meeting.processingError && (
+        <div
+          style={{
+            fontSize: "0.75rem",
+            lineHeight: 1.4,
+            color: "var(--danger)",
+            background: "rgba(248,113,113,0.08)",
+            border: "1px solid rgba(248,113,113,0.25)",
+            borderRadius: "0.5rem",
+            padding: "0.5rem 0.625rem",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {meeting.processingError}
+        </div>
+      )}
 
       {/* Progress bar (only while processing) */}
       {isProcessing && (

@@ -11,6 +11,7 @@ export async function groqChat(
     model: 'llama-3.3-70b-versatile',
     messages: [{ role: 'system', content: system }, ...messages],
     max_tokens: 1000,
+    temperature: 0,
     stream,
   })
 }

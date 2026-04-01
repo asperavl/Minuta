@@ -10,6 +10,8 @@ type Meeting = {
   processing_error?: string | null;
   word_count?: number;
   speaker_count?: number;
+  meeting_date?: string | null;
+  sort_order?: number;
   created_at?: string;
   summary?: {
     tldr?: string;
@@ -59,6 +61,18 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
     return () => stopPolling();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Sync with parent updates
+  useEffect(() => {
+    setCurrentMeeting((prev) => {
+      // Avoid overwriting a locally polling 'processing' status with an older 'pending' prop
+      // BUT if the parent passes a fresh 'complete' or updated 'summary', accept it.
+      if (meeting.processing_status === "complete" || meeting.summary) return meeting;
+      return prev.processing_status === "processing" && meeting.processing_status === "pending" 
+        ? prev 
+        : meeting;
+    });
+  }, [meeting]);
 
   function startPolling() {
     if (pollingInterval.current) return;
@@ -117,13 +131,19 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
   const summary = currentMeeting.summary;
   const sentiment = summary?.overall_sentiment;
   const stats = summary?.stats;
-  const date = currentMeeting.created_at
-    ? new Date(currentMeeting.created_at).toLocaleDateString(undefined, {
+  const date = currentMeeting.meeting_date
+    ? new Date(currentMeeting.meeting_date).toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
         year: "numeric",
       })
-    : null;
+    : currentMeeting.created_at
+      ? new Date(currentMeeting.created_at).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : null;
 
   return (
     <a

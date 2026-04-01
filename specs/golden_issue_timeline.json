@@ -1,0 +1,44 @@
+{
+  "scenario": "meeting_lifecycle_hackathon_core",
+  "meetings": [
+    {
+      "file": "test_meeting.txt",
+      "must_include_issue_keywords": ["api", "onboarding"],
+      "expected_status_by_keyword": {
+        "api": "open",
+        "onboarding": "open"
+      }
+    },
+    {
+      "file": "test_meeting_2.txt",
+      "must_include_issue_keywords": ["api", "onboarding", "performance"],
+      "expected_status_by_keyword": {
+        "api": "resolved",
+        "onboarding": "open",
+        "performance": "open"
+      }
+    },
+    {
+      "file": "test_meeting_3.txt",
+      "must_include_issue_keywords": ["onboarding", "performance", "cross meeting"],
+      "expected_status_by_keyword": {
+        "onboarding": "resolved",
+        "performance": "resolved",
+        "cross meeting": "open"
+      }
+    },
+    {
+      "file": "test_meeting_4.txt",
+      "must_include_issue_keywords": ["avatar", "cors"],
+      "expected_status_by_keyword": {
+        "avatar": "open"
+      }
+    }
+  ],
+  "final_expected_status_by_keyword": {
+    "api": "resolved",
+    "onboarding": "resolved",
+    "performance": "resolved",
+    "avatar": "open"
+  }
+}

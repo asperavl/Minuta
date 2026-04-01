@@ -1,132 +1,544 @@
-// @ts-nocheck — Deno runtime: no tsconfig, no Node types
+// @ts-nocheck
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { GoogleGenAI, Type, Schema } from "https://esm.sh/@google/genai@1.45.0";
+import Groq from "https://esm.sh/groq-sdk@0.37.0";
 
-// ————————————————————————————————————————————————————————————————————————————————
-// ENV — SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are
-// auto-injected by Supabase Edge Function runtime.
-// Only GEMINI_API_KEY must be set via:
-//   supabase secrets set GEMINI_API_KEY=...
-// ————————————————————————————————————————————————————————————————————————————————
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
+const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
 
-// ————————————————————————————————————————————————————————————————————————————————
-// Helpers — must be inlined (cannot import from /lib in Deno)
-// ————————————————————————————————————————————————————————————————————————————————
+const EXTRACTION_MODEL = "llama-3.3-70b-versatile";
+const VERIFY_MODEL = "llama-3.1-8b-instant";
+const DEFAULT_EXTRACTION_MAX_TOKENS = 4096;
+const DEFAULT_VERIFY_MAX_TOKENS = 2048;
+const EXTRACTION_PROMPT_VERSION_A = "extract_v1_baseline_2026_04_01";
+const EXTRACTION_PROMPT_VERSION_B = "extract_v2_lifecycle_strict_2026_04_01";
+const VERIFY_PROMPT_VERSION = "verify_v1_quote_match_2026_04_01";
 
-/** Strip markdown fences and extract the first JSON object/array */
+type PromptVariant = "A" | "B";
+type GroqCallResult = {
+  content: string;
+  finishReason: string | null;
+  model: string;
+};
+type ReconcileRequestOptions = {
+  analysisRunId?: string;
+  reconcilePromptVariant?: PromptVariant;
+  reconcileModelOverride?: string;
+};
+type DiagnosticInsert = {
+  project_id: string;
+  meeting_id: string;
+  run_id?: string | null;
+  stage: "extract" | "verify" | "reconcile";
+  prompt_version?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  finish_reason?: string | null;
+  parse_success: boolean;
+  item_counts?: Record<string, unknown>;
+  flags?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+  error?: string | null;
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
 function safeParseJSON<T>(raw: string): T | null {
   if (!raw) return null;
   try {
-    // Strip ```json ... ``` or ``` ... ``` wrappers
     let cleaned = raw.trim();
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
-    // Find first { or [
-    const firstBrace = cleaned.indexOf("{");
-    const firstBracket = cleaned.indexOf("[");
-    let start = -1;
-    if (firstBrace === -1 && firstBracket === -1) return null;
-    if (firstBrace === -1) start = firstBracket;
-    else if (firstBracket === -1) start = firstBrace;
-    else start = Math.min(firstBrace, firstBracket);
-    cleaned = cleaned.slice(start);
+
+    // 1. Strip the entire thought process block if it exists
+    cleaned = cleaned.replace(/<thought_process>[\s\S]*?<\/thought_process>/i, "");
+
+    // First try extracting exactly what's inside a markdown code block (if present)
+    // The CoT block might contain stray braces { } which breaks indexOf("{")
+    const mdMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (mdMatch) {
+      cleaned = mdMatch[1].trim();
+    } else {
+      // If no markdown block is found, try slicing from { or [ to the matching closing brace } or ]
+      const firstBrace = cleaned.indexOf("{");
+      const firstBracket = cleaned.indexOf("[");
+      const lastBrace = cleaned.lastIndexOf("}");
+      const lastBracket = cleaned.lastIndexOf("]");
+      
+      let start = -1;
+      let end = -1;
+
+      if (firstBrace !== -1 && firstBracket !== -1) start = Math.min(firstBrace, firstBracket);
+      else if (firstBrace !== -1) start = firstBrace;
+      else if (firstBracket !== -1) start = firstBracket;
+      
+      if (lastBrace !== -1 && lastBracket !== -1) end = Math.max(lastBrace, lastBracket) + 1;
+      else if (lastBrace !== -1) end = lastBrace + 1;
+      else if (lastBracket !== -1) end = lastBracket + 1;
+
+      if (start !== -1 && end !== -1 && end > start) {
+        cleaned = cleaned.substring(start, end);
+      }
+    }
+
     return JSON.parse(cleaned) as T;
-  } catch {
+  } catch (err) {
+    console.warn("safeParseJSON Error:", err);
     return null;
   }
 }
 
-/** Gemini with retry, exponential backoff, schemas, and jitter (6 attempts) */
-async function geminiWithRetry(
-  ai: GoogleGenAI,
-  prompt: string,
-  schema: Schema | null = null,
-  maxRetries = 6
-): Promise<string> {
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const config: any = { temperature: 0.0 };
-      if (schema) {
-        config.responseMimeType = "application/json";
-        config.responseSchema = schema;
-      }
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: config,
-      });
-      
-      // Option 3 throttle: sleep 4s after every successful Gemini call to protect the RPM limit
-      await new Promise((r) => setTimeout(r, 4000));
-      
-      return response.text ?? "";
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.error(`Gemini attempt ${attempt + 1}/${maxRetries} failed:`, lastError.message);
-      if (attempt < maxRetries - 1) {
-        // Exponential backoff: 2s, 4s, 8s, 16s, 32s + max 2s jitter
-        const baseDelay = 2000 * Math.pow(2, attempt);
-        const jitter = Math.random() * 2000;
-        const totalDelay = baseDelay + jitter;
-        console.log(`Rate limit hit (or error). Retrying in ${Math.round(totalDelay/1000)}s...`);
-        await new Promise((r) => setTimeout(r, totalDelay));
-      }
-    }
-  }
-  throw lastError ?? new Error(`Gemini call failed after ${maxRetries} retries`);
+function sanitizePromptVariant(raw: unknown): PromptVariant {
+  if (typeof raw === "string" && raw.toUpperCase() === "B") return "B";
+  return "A";
 }
 
-// ————————————————————————————————————————————————————————————————————————————————
-// Main handler
-// ————————————————————————————————————————————————————————————————————————————————
+function sanitizeMaxTokens(raw: unknown, fallback: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback;
+  const rounded = Math.floor(raw);
+  if (rounded < 512) return 512;
+  if (rounded > 8192) return 8192;
+  return rounded;
+}
+
+function extractionPromptVersion(variant: PromptVariant): string {
+  return variant === "B"
+    ? EXTRACTION_PROMPT_VERSION_B
+    : EXTRACTION_PROMPT_VERSION_A;
+}
+
+function supportingQuoteLooksResolved(quote: string | null | undefined): boolean {
+  if (!quote) return false;
+  return /\b(resolved|fixed|closed|shipped|complete|completed|done)\b/i.test(
+    quote
+  );
+}
+
+function countResolvedWithoutEvidence(topics: any[]): number {
+  let count = 0;
+  for (const topic of topics) {
+    const status = String(topic?.status ?? "").toLowerCase();
+    if (status !== "resolved") continue;
+    if (!supportingQuoteLooksResolved(topic?.supporting_quote)) count += 1;
+  }
+  return count;
+}
+
+async function insertDiagnostic(supabase: any, entry: DiagnosticInsert): Promise<void> {
+  const payload = {
+    project_id: entry.project_id,
+    meeting_id: entry.meeting_id,
+    run_id: entry.run_id ?? "default",
+    stage: entry.stage,
+    prompt_version: entry.prompt_version ?? null,
+    model: entry.model ?? null,
+    temperature: entry.temperature ?? null,
+    max_tokens: entry.max_tokens ?? null,
+    finish_reason: entry.finish_reason ?? null,
+    parse_success: entry.parse_success,
+    item_counts: entry.item_counts ?? {},
+    flags: entry.flags ?? {},
+    payload: entry.payload ?? null,
+    error: entry.error ?? null,
+  };
+
+  const { error } = await supabase
+    .from("analysis_diagnostics")
+    .upsert(payload, { onConflict: "meeting_id,stage,run_id" });
+  if (error) {
+    console.warn("[process-transcript] Failed to insert diagnostic:", error.message);
+  }
+}
+
+const VALID_URGENCIES = ['Immediate', 'This Week', 'Low Priority', 'No Action'] as const;
+function sanitizeUrgency(raw: string | null | undefined): string {
+  if (!raw) return 'Low Priority';
+  if ((VALID_URGENCIES as readonly string[]).includes(raw)) return raw;
+  const lower = raw.toLowerCase();
+  if (lower.includes('immediate') || lower.includes('critical') || lower.includes('urgent') || lower.includes('asap')) return 'Immediate';
+  if (lower.includes('this week') || lower.includes('high') || lower.includes('soon')) return 'This Week';
+  if (lower.includes('low') || lower.includes('minor') || lower.includes('eventually')) return 'Low Priority';
+  if (lower.includes('no action') || lower.includes('none') || lower.includes('fyi') || lower.includes('informational')) return 'No Action';
+  return 'Low Priority';
+}
+
+const VALID_SENTIMENTS = ['positive', 'neutral', 'conflict', 'frustrated', 'uncertain', 'enthusiastic'] as const;
+function sanitizeSentimentLabel(raw: string | null | undefined): string {
+  if (!raw) return 'neutral';
+  if ((VALID_SENTIMENTS as readonly string[]).includes(raw)) return raw;
+  const lower = raw.toLowerCase();
+  if (lower.includes('positive') || lower.includes('agreement')) return 'positive';
+  if (lower.includes('conflict') || lower.includes('disagree') || lower.includes('tension')) return 'conflict';
+  if (lower.includes('frustrat')) return 'frustrated';
+  if (lower.includes('uncertain') || lower.includes('unsure') || lower.includes('hesitant')) return 'uncertain';
+  if (lower.includes('enthus') || lower.includes('excited') || lower.includes('celebrat')) return 'enthusiastic';
+  return 'neutral';
+}
+
+const VALID_ISSUE_EVENT_TYPES = new Set([
+  "raised",
+  "resolved",
+  "reopened",
+  "obsoleted",
+]);
+
+function sanitizeIssueEventType(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const lowered = raw.toLowerCase().trim();
+  return VALID_ISSUE_EVENT_TYPES.has(lowered) ? lowered : null;
+}
+
+async function groqWithRetry(
+  model: string,
+  prompt: string,
+  retries = 6,
+  maxTokens = 4096
+): Promise<GroqCallResult> {
+  const groq = new Groq({ apiKey: GROQ_API_KEY });
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await groq.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: maxTokens,
+      });
+      return {
+        content: res.choices[0].message.content ?? "",
+        finishReason: res.choices[0].finish_reason ?? null,
+        model,
+      };
+    } catch (err: any) {
+      const status =
+        err?.status ?? err?.response?.status ?? err?.cause?.status ?? null;
+      const message = String(err?.message ?? err ?? "");
+      const isRateLimited =
+        status === 429 ||
+        message.toLowerCase().includes("rate limit") ||
+        message.toLowerCase().includes("too many requests") ||
+        message.includes("429");
+
+      console.error(
+        `Groq attempt ${i + 1}/${retries} failed (status=${status ?? "unknown"}):`,
+        message
+      );
+      if (i === retries - 1) throw err;
+
+      // Use heavier backoff for 429s to let token/RPM windows recover.
+      const base = isRateLimited ? 6000 : 1000;
+      const cap = isRateLimited ? 90000 : 15000;
+      const jitter = Math.floor(Math.random() * 1200);
+      const delay = Math.min(cap, base * Math.pow(2, i)) + jitter;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
+async function triggerReconcileProject(
+  projectId: string,
+  mode: "incremental" | "full",
+  meetingIds: string[],
+  options?: ReconcileRequestOptions
+): Promise<void> {
+  const edgeFnUrl = `${SUPABASE_URL}/functions/v1/reconcile-project`;
+  const body: Record<string, unknown> = { projectId, mode };
+  if (meetingIds.length > 0) body.meetingIds = meetingIds;
+  if (options?.analysisRunId) body.analysisRunId = options.analysisRunId;
+  if (options?.reconcilePromptVariant) {
+    body.reconcilePromptVariant = options.reconcilePromptVariant;
+  }
+  if (options?.reconcileModelOverride) {
+    body.reconcileModelOverride = options.reconcileModelOverride;
+  }
+
+  try {
+    const res = await fetch(edgeFnUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok && res.status !== 202) {
+      const text = await res.text().catch(() => "");
+      console.warn(
+        `[process-transcript] reconcile-project returned ${res.status}: ${text}`
+      );
+    }
+  } catch (err) {
+    console.warn("[process-transcript] Failed to queue reconciliation:", err);
+  }
+}
+
+// ── Prompts ────────────────────────────────────────────────────────────────
+
+function buildCombinedPrompt(transcript: string, variant: PromptVariant): string {
+  const strictLifecycleRules =
+    variant === "B"
+      ? `
+- Lifecycle strictness (must follow):
+  - Mark topic.status = Resolved ONLY if transcript explicitly confirms fixed/shipped/closed/completed and supporting_quote contains that evidence.
+  - If discussion says delayed, blocked, workaround, scope cut, deferred, or partial mitigation, status must be Unresolved or Deferred (never Resolved).
+  - For each issue-level topic with status Unresolved or Deferred, emit an issue_events entry with event_type="raised" unless a clear reopen/resolution event is explicitly stated.
+  - Never emit "resolved" issue_events without direct resolution evidence in supporting_quote.`
+      : "";
+
+  return `You are analyzing a meeting transcript. Return a single JSON object with no markdown, no backticks, no preamble. Just raw JSON.
+
+The JSON must contain exactly these keys:
+
+{
+  "summary": {
+    "tldr": "<2-3 sentence paragraph — specific, not generic>",
+    "overall_sentiment": {
+      "label": "positive | mixed | tense | negative",
+      "score": <number -1.0 to 1.0>
+    },
+    "stats": {
+      "decisions": <integer>,
+      "action_items": <integer>,
+      "dominant_speaker": "<name>",
+      "speaker_breakdown": [{ "name": "<name>", "percentage": <integer 0-100> }]
+    },
+    "topics": [
+      {
+        "index": <0-based integer>,
+        "title": "<short topic name>",
+        "start_time": "<HH:MM:SS or estimated position>",
+        "end_time": "<HH:MM:SS or estimated position>",
+        "summary": "<full standalone paragraph — minimum 3 sentences — detailed enough that someone not in the meeting fully understands what was discussed, argued, agreed, and left open>",
+        "status": "Resolved | Unresolved | Deferred | Uncertain",
+        "supporting_quote": "<verbatim quote from transcript justifying status, or null if none found>",
+        "urgency": "Immediate | This Week | Low Priority | No Action",
+        "circled_back_from": <index of earlier topic this revisits, or null>,
+        "circled_back_at": <index of later topic that revisits this, or null>
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "id": <integer starting at 1>,
+      "description": "<specific decision made>"
+    }
+  ],
+  "action_items": [
+    {
+      "id": <integer starting at 1>,
+      "description": "<specific task — detailed enough to act on without reading the transcript>",
+      "owner": "<person responsible or 'Unassigned' — never guess>",
+      "due_date": "<date mentioned or 'Not specified' — never infer>",
+      "urgency": "Immediate | This Week | Low Priority | No Action",
+      "context": "<1-2 sentences explaining why this item exists and what discussion produced it>",
+      "related_topic": "<topic title from the meeting>"
+    }
+  ],
+  "issue_events": [
+    {
+      "id": <integer starting at 1>,
+      "event_type": "raised | resolved | reopened | obsoleted",
+      "issue_title": "<short issue title>",
+      "description": "<what changed about this issue in this meeting>",
+      "context": "<1 sentence explaining where this event came from>",
+      "supporting_quote": "<direct verbatim quote proving this lifecycle event>"
+    }
+  ],
+  "sentiment": {
+    "segments": [
+      {
+        "segment_index": <0-based integer>,
+        "speaker": "<dominant speaker name or 'Multiple'>",
+        "text_excerpt": "<first 150 characters of segment>",
+        "sentiment_label": "positive | neutral | conflict | frustrated | uncertain | enthusiastic",
+        "sentiment_score": <float -1.0 to 1.0>,
+        "start_time": "<timestamp if available from VTT, otherwise null>"
+      }
+    ],
+    "speaker_observations": [
+      {
+        "speaker": "<name>",
+        "observation": "<one sentence describing this speaker's overall tone across the whole meeting>",
+        "average_score": <float>
+      }
+    ]
+  }
+}
+
+Rules:
+- Never invent content not present in the transcript
+- supporting_quote must be verbatim from the transcript. If none exists, set status to Uncertain.
+- owner: use Unassigned if no person was named — never guess
+- due_date: use Not specified if no date was mentioned — never infer
+- speaker_breakdown percentages must sum to 100
+- Divide transcript into natural segments of 15-20 dialogue lines each for sentiment
+- temperature is 0 — output must be precise and consistent
+- The topics array must include every issue-level discussion (bugs, blockers, incidents, major risks, major feature requests, explicit closures/reopens)
+- Do not collapse separate issue-level discussions into one topic
+- If the transcript explicitly says an issue is fixed/closed/resolved, mark that topic status as Resolved and include the exact closing quote
+- If an issue is still active or not confirmed fixed, do NOT mark it Resolved
+- Emit issue_events for explicit lifecycle moments (raised/resolved/reopened/obsoleted)
+- issue_events.supporting_quote must be verbatim; if no direct evidence exists, omit that event
+${strictLifecycleRules}
+
+Transcript:
+${transcript}`;
+}
+
+function buildVerifyPrompt(transcript: string, pass1Json: string): string {
+  return `You are a fact-checker. You will receive extracted decisions and action items from a meeting, plus the original transcript.
+
+For each item (identified by its integer id), find a DIRECT VERBATIM quote from the transcript that supports it.
+
+Return a JSON object with no markdown, no backticks, no preamble. Just raw JSON:
+
+{
+  "decisions": [
+    { "id": <integer>, "verified": <boolean>, "supporting_quote": "<verbatim quote or null>" }
+  ],
+  "action_items": [
+    { "id": <integer>, "verified": <boolean>, "supporting_quote": "<verbatim quote or null>" }
+  ]
+}
+
+Rules:
+- verified = true ONLY if you found a direct verbatim quote in the transcript
+- If no quote exists, set verified = false and supporting_quote = null
+- Do not paraphrase — quotes must be exact character sequences from the transcript
+
+EXTRACTIONS:
+${pass1Json}
+
+TRANSCRIPT:
+${transcript}`;
+}
+
+function buildReconciliationPrompt(
+  topics: any[],
+  actionItems: any[],
+  existingIssues: any[]
+): string {
+  return `You are a Senior Technical Project Manager AI. Your job is to strictly match conversational items to existing tracker tickets. 
+If a fundamental product defect or feature request is discussed, log it as a NEW ticket ONLY if it doesn't map to an existing one.
+
+INSTRUCTIONS:
+First, write a <thought_process> block evaluating the data.
+Then, output the JSON. 
+
+1. THOUGHT PROCESS: 
+Analyze EXISTING ISSUES to understand their root problem context.
+Evaluate each EXTRACTED TOPIC. If the topic is just a status update, a meeting ritual (e.g. "team retrospective"), or a routine design review without a core bug, you MUST NOT create an issue for it. Only create a NEW issue if the topic describes a concrete software bug, architectural blocker, or a completely new feature request.
+Evaluate each EXTRACTED WORKFLOW TASK. Tasks (e.g., "Draft an email", "Update mockups", "Create a demo script") CANNOT be logged as NEW issues. They can ONLY be matched to EXISTING ISSUES if they represent work being done to resolve that existing issue.
+
+2. JSON OUTPUT:
+Return a JSON object with no markdown other than the JSON block itself.
+
+{
+  "matches": [
+    {
+      "extraction_id": "<string or integer ID from the input>",
+      "issue_id": "<existing issue UUID or null>",
+      "is_new_issue": <boolean>,
+      "new_issue_title": "<title or null>",
+      "new_issue_description": "<description or null>",
+      "mention_type": "raised | discussed | escalated | resolved | obsoleted | reopened",
+      "new_status": "open | in_progress | resolved | obsolete",
+      "context": "<1 sentence explaining the connection>",
+      "supporting_quote": "<verbatim quote or null>"
+    }
+  ]
+}
+
+STATE MANAGEMENT RULES:
+- new_status must be 'open', 'in_progress', 'resolved', or 'obsolete'. 
+- ONLY set new_status to 'resolved' if the actual underlying defect or feature was completely shipped, fixed, or permanently abandoned. If the team simply created a temporary workaround or deferred the deadline, it remains 'open'.
+
+EXISTING ISSUES:
+${JSON.stringify(existingIssues ?? [])}
+
+EXTRACTED TOPICS (These indicate fundamental project discussions/bugs. They CAN spawn NEW tickets):
+${JSON.stringify(topics)}
+
+EXTRACTED WORKFLOW TASKS (These are action items. They cannot spawn NEW tickets, they can only map to EXISTING tickets):
+${JSON.stringify(actionItems)}`;
+}
+
+// ── CORS ───────────────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// ── Main Handler ───────────────────────────────────────────────────────────
+
 Deno.serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
+  if (req.method === "OPTIONS")
     return new Response("ok", { headers: CORS_HEADERS });
-  }
 
   let meetingId: string;
+  let isHistoricalInsert = false;
+  let analysisRunId: string | null = null;
+  let extractPromptVariant: PromptVariant = "B";
+  let extractMaxTokens = DEFAULT_EXTRACTION_MAX_TOKENS;
+  let reconcilePromptVariant: PromptVariant = "B";
+  let reconcileModelOverride: string | null = null;
   try {
     const body = await req.json();
     meetingId = body.meetingId;
+    isHistoricalInsert = body.isHistoricalInsert === true;
+    const config =
+      body && typeof body.analysisConfig === "object"
+        ? body.analysisConfig
+        : body;
+    if (typeof config?.analysisRunId === "string" && config.analysisRunId.trim()) {
+      analysisRunId = config.analysisRunId.trim();
+    }
+    extractPromptVariant = sanitizePromptVariant(
+      config?.extractPromptVariant ?? "B"
+    );
+    extractMaxTokens = sanitizeMaxTokens(
+      config?.extractMaxTokens,
+      DEFAULT_EXTRACTION_MAX_TOKENS
+    );
+    reconcilePromptVariant = sanitizePromptVariant(
+      config?.reconcilePromptVariant ?? "B"
+    );
+    if (
+      typeof config?.reconcileModelOverride === "string" &&
+      config.reconcileModelOverride.trim()
+    ) {
+      reconcileModelOverride = config.reconcileModelOverride.trim();
+    }
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+    return new Response(
+      JSON.stringify({ error: "Invalid request body" }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      }
+    );
   }
-
-  if (!meetingId) {
-    return new Response(JSON.stringify({ error: "meetingId is required" }), { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
-  }
-
-  console.log(`[process-transcript] Starting for meeting ${meetingId}`);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // Fetch meeting raw_text and project_id
-  // ————————————————————————————————————————————————————————————————————————————————
+  // Fetch meeting
   const { data: meeting, error: meetingErr } = await supabase
     .from("meetings")
-    .select("id, project_id, raw_text, file_name, processing_status")
+    .select(
+      "id, project_id, raw_text, file_name, processing_status, meeting_date, sort_order"
+    )
     .eq("id", meetingId)
     .single();
 
   if (meetingErr || !meeting) {
-    console.error("Meeting not found:", meetingErr?.message);
-    return new Response(JSON.stringify({ error: "Meeting not found" }), { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+    return new Response(JSON.stringify({ error: "Meeting not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
   }
 
-  // Reset to processing if retrying from failed state
   if (meeting.processing_status === "failed") {
     await supabase
       .from("meetings")
@@ -137,599 +549,343 @@ Deno.serve(async (req) => {
   const transcript = meeting.raw_text;
   const projectId = meeting.project_id;
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // STAGE 1 — Summary
-  // Skip if summary already exists
-  // ————————————————————————————————————————————————————————————————————————————————
-  const { data: existingMeeting } = await supabase
+  console.log(
+    `[process-transcript] Starting 3-Call Pipeline for ${meetingId} (extractVariant=${extractPromptVariant}, extractMaxTokens=${extractMaxTokens}, reconcileVariant=${reconcilePromptVariant}, reconcileModelOverride=${reconcileModelOverride ?? "none"})`
+  );
+
+  // ────────────────────────────────────────────────────────────────────────
+  // CALL 1 — Combined Extraction (llama-3.3-70b-versatile)
+  // Summary + Decisions + Action Items + Sentiment in one call
+  // Fatal on parse failure
+  // ────────────────────────────────────────────────────────────────────────
+  await supabase
     .from("meetings")
-    .select("summary")
-    .eq("id", meetingId)
-    .single();
+    .update({ processing_stage: "extracting" })
+    .eq("id", meetingId);
 
-  if (!existingMeeting?.summary) {
-    await supabase.from("meetings").update({ processing_stage: "summarizing" }).eq("id", meetingId);
-    console.log("[Stage 1] Running summary generation…");
-    try {
-      const summarySchema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-          tldr: { type: Type.STRING },
-          overall_sentiment: {
-            type: Type.OBJECT,
-            properties: {
-              label: { type: Type.STRING },
-              score: { type: Type.NUMBER }
-            }
-          },
-          stats: {
-            type: Type.OBJECT,
-            properties: {
-              decisions: { type: Type.INTEGER },
-              action_items: { type: Type.INTEGER },
-              dominant_speaker: { type: Type.STRING },
-              speaker_breakdown: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: { name: { type: Type.STRING }, percentage: { type: Type.INTEGER } }
-                }
-              }
-            }
-          },
-          topics: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                index: { type: Type.INTEGER },
-                title: { type: Type.STRING },
-                start_time: { type: Type.STRING },
-                end_time: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                status: { type: Type.STRING },
-                supporting_quote: { type: Type.STRING, nullable: true },
-                urgency: { type: Type.STRING },
-                circled_back_from: { type: Type.INTEGER, nullable: true },
-                circled_back_at: { type: Type.INTEGER, nullable: true }
-              }
-            }
-          }
-        }
-      };
+  let combined: any;
+  let extractionCall: GroqCallResult | null = null;
+  try {
+    extractionCall = await groqWithRetry(
+      EXTRACTION_MODEL,
+      buildCombinedPrompt(transcript, extractPromptVariant),
+      6,
+      extractMaxTokens
+    );
+    combined = safeParseJSON(extractionCall.content);
+    if (!combined) throw new Error("Combined call JSON parse failed");
 
-      const summaryPrompt = `You are analyzing a meeting transcript to produce a structured summary.
+    const topics = Array.isArray(combined?.summary?.topics)
+      ? combined.summary.topics
+      : [];
+    const issueEvents = Array.isArray(combined?.issue_events)
+      ? combined.issue_events
+      : [];
 
-Rules:
-- Never invent topics not present in the transcript.
-- If you cannot determine a field, use null — never guess.
-- supporting_quote must be a verbatim excerpt from the transcript. If none exists, set status to Uncertain.
-- speaker_breakdown percentages must sum to 100.
-- Detect circled-back topics: if a topic is explicitly revisited later, set circled_back_at on the original and circled_back_from on the revisit.
-- Topics: Do NOT split single cohesive discussions into multiple micro-topics. Group related talk tracks together.
-- Stats: Only count a 'decision' if the transcript shows explicit agreement, not just a proposal.
+    await insertDiagnostic(supabase, {
+      project_id: projectId,
+      meeting_id: meetingId,
+      run_id: analysisRunId,
+      stage: "extract",
+      prompt_version: extractionPromptVersion(extractPromptVariant),
+      model: extractionCall.model,
+      temperature: 0,
+      max_tokens: extractMaxTokens,
+      finish_reason: extractionCall.finishReason,
+      parse_success: true,
+      item_counts: {
+        topics: topics.length,
+        issue_events: issueEvents.length,
+        decisions: Array.isArray(combined?.decisions) ? combined.decisions.length : 0,
+        action_items: Array.isArray(combined?.action_items)
+          ? combined.action_items.length
+          : 0,
+      },
+      flags: {
+        topic_marked_resolved_without_resolution_quote:
+          countResolvedWithoutEvidence(topics),
+      },
+      payload: {
+        topics,
+        issue_events: issueEvents,
+      },
+    });
 
-Transcript:
-${transcript}`;
-
-      const summaryRaw = await geminiWithRetry(ai, summaryPrompt, summarySchema);
-      const summaryData = safeParseJSON<Record<string, unknown>>(summaryRaw);
-
-      if (summaryData) {
-        await supabase
-          .from("meetings")
-          .update({ summary: summaryData })
-          .eq("id", meetingId);
-        console.log("[Stage 1] Summary stored.");
-      } else {
-        console.warn("[Stage 1] Failed to parse summary JSON — skipping, continuing pipeline.");
-      }
-    } catch (err) {
-      console.error("[Stage 1] Summary failed (non-fatal):", err);
-      // Non-fatal: continue pipeline
-    }
-  } else {
-    console.log("[Stage 1] Summary already exists — skipping.");
+    console.log("[Call 1] Combined Extraction Complete.");
+    // Small pacing gap before next model call to avoid bursty RPM spikes.
+    await new Promise((r) => setTimeout(r, 2200));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[Call 1] FATAL:", msg);
+    await insertDiagnostic(supabase, {
+      project_id: projectId,
+      meeting_id: meetingId,
+      run_id: analysisRunId,
+      stage: "extract",
+      prompt_version: extractionPromptVersion(extractPromptVariant),
+      model: extractionCall?.model ?? EXTRACTION_MODEL,
+      temperature: 0,
+      max_tokens: extractMaxTokens,
+      finish_reason: extractionCall?.finishReason ?? null,
+      parse_success: false,
+      item_counts: {},
+      flags: {},
+      payload: extractionCall?.content
+        ? { raw_output_preview: extractionCall.content.slice(0, 4000) }
+        : undefined,
+      error: msg,
+    });
+    await supabase
+      .from("meetings")
+      .update({ processing_status: "failed", processing_error: msg })
+      .eq("id", meetingId);
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
   }
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // STAGE 2 + 3 — Pass 1 Extraction + Pass 2 Verification
-  // Skip entirely if extractions already exist
-  // ————————————————————————————————————————————————————————————————————————————————
-  const { data: existingExtractions } = await supabase
-    .from("extractions")
-    .select("id")
-    .eq("meeting_id", meetingId)
-    .limit(1);
+  // ────────────────────────────────────────────────────────────────────────
+  // CALL 2 — Verification (llama-3.1-8b-instant)
+  // Fact-checks decisions + action_items against transcript
+  // Non-fatal on parse failure — marks all unverified
+  // ────────────────────────────────────────────────────────────────────────
+  await supabase
+    .from("meetings")
+    .update({ processing_stage: "verifying" })
+    .eq("id", meetingId);
 
-  if (!existingExtractions || existingExtractions.length === 0) {
-    await supabase.from("meetings").update({ processing_stage: "extracting" }).eq("id", meetingId);
-    console.log("[Stage 2] Running Pass 1 extraction…");
+  let verified: any = null;
+  let verifyCall: GroqCallResult | null = null;
+  let verifyError: string | null = null;
+  try {
+    const pass1Json = JSON.stringify({
+      decisions: combined.decisions,
+      action_items: combined.action_items,
+    });
+    verifyCall = await groqWithRetry(
+      VERIFY_MODEL,
+      buildVerifyPrompt(transcript, pass1Json),
+      6,
+      DEFAULT_VERIFY_MAX_TOKENS
+    );
+    verified = safeParseJSON(verifyCall.content);
+    console.log("[Call 2] Verification Complete.");
+  } catch (err) {
+    verifyError = err instanceof Error ? err.message : String(err);
+    console.warn("[Call 2] Non-fatal failure:", err);
+  }
 
-    const pass1Schema: Schema = {
-      type: Type.OBJECT,
-      properties: {
-        decisions: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              description: { type: Type.STRING }
-            }
-          }
-        },
-        action_items: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              description: { type: Type.STRING },
-              owner: { type: Type.STRING },
-              due_date: { type: Type.STRING },
-              urgency: { type: Type.STRING },
-              context: { type: Type.STRING },
-              related_topic: { type: Type.STRING }
-            }
-          }
-        }
+  const decisionsVerifiedCount = Array.isArray(verified?.decisions)
+    ? verified.decisions.filter((d: any) => d?.verified === true).length
+    : 0;
+  const actionItemsVerifiedCount = Array.isArray(verified?.action_items)
+    ? verified.action_items.filter((a: any) => a?.verified === true).length
+    : 0;
+
+  await insertDiagnostic(supabase, {
+    project_id: projectId,
+    meeting_id: meetingId,
+    run_id: analysisRunId,
+    stage: "verify",
+    prompt_version: VERIFY_PROMPT_VERSION,
+    model: verifyCall?.model ?? VERIFY_MODEL,
+    temperature: 0,
+    max_tokens: DEFAULT_VERIFY_MAX_TOKENS,
+    finish_reason: verifyCall?.finishReason ?? null,
+    parse_success: Boolean(verified),
+    item_counts: {
+      decisions_input: Array.isArray(combined?.decisions) ? combined.decisions.length : 0,
+      action_items_input: Array.isArray(combined?.action_items)
+        ? combined.action_items.length
+        : 0,
+      decisions_verified: decisionsVerifiedCount,
+      action_items_verified: actionItemsVerifiedCount,
+    },
+    flags: {},
+    payload: verifyCall?.content
+      ? { raw_output_preview: verifyCall.content.slice(0, 2500) }
+      : undefined,
+    error: verifyError,
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // MERGE + INSERT — Apply Call 1 + Call 2 results to database
+  // ────────────────────────────────────────────────────────────────────────
+  await supabase
+    .from("meetings")
+    .update({ processing_stage: "merging" })
+    .eq("id", meetingId);
+  console.log("[Insert] Applying to Database...");
+
+  try {
+    // 1. Summary
+    if (combined?.summary) {
+      if (combined.summary.overall_sentiment?.label) {
+        combined.summary.overall_sentiment.label =
+          combined.summary.overall_sentiment.label.toLowerCase();
       }
-    };
-
-    const pass1Prompt = `You are extracting structured data from a meeting transcript.
-
-Extract ONLY decisions and action items that are explicitly stated in the transcript.
-Do NOT infer, assume, or add anything not directly said.
-Do NOT hallucinate owners, dates, or tasks.
-
-Rules:
-- If no due date was mentioned: set due_date to "Not specified" — never infer a date
-- If no owner was named: set owner to "Unassigned" — never guess a person
-- description must be specific enough that the owner knows exactly what to do without reading the transcript
-- context must explain WHY this item exists — what discussion led to it
-- Decisions: A decision MUST be a final, agreed-upon outcome. Do NOT extract proposals, ideas, or unresolved debates as decisions. If it's just 'let's look into it', it's an action, not a decision.
-- Actions: An action item MUST be a concrete task assigned to a specific person or team. Do NOT extract vague next steps like 'we need to think about X'. If there is no clear owner or task, skip it.
-
-Transcript:
-${transcript}`;
-
-    let pass1: any = null;
-    try {
-      const pass1Raw = await geminiWithRetry(ai, pass1Prompt, pass1Schema);
-      pass1 = safeParseJSON<any>(pass1Raw);
-
-      if (!pass1) {
-        throw new Error("Pass 1 extraction returned unparseable JSON");
+      // Attach speaker observations into the summary JSON
+      if (combined?.sentiment?.speaker_observations) {
+        combined.summary.speaker_observations =
+          combined.sentiment.speaker_observations;
       }
-
-      console.log(
-        `[Stage 2] Extracted ${pass1.decisions?.length ?? 0} decisions, ${pass1.action_items?.length ?? 0} action items.`
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[Stage 2] FATAL:", msg);
       await supabase
         .from("meetings")
-        .update({ processing_status: "failed", processing_error: msg })
+        .update({ summary: combined.summary })
         .eq("id", meetingId);
-      return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
     }
 
-    // ——— Stage 3: Pass 2 Verification —————————————————————————————————————————————
-    await supabase.from("meetings").update({ processing_stage: "verifying" }).eq("id", meetingId);
-    console.log("[Stage 3] Running Pass 2 verification…");
-    
-    const pass2Schema: Schema = {
-      type: Type.OBJECT,
-      properties: {
-        decisions: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              verified: { type: Type.BOOLEAN },
-              supporting_quote: { type: Type.STRING, nullable: true },
-              quote_location: { type: Type.STRING, nullable: true }
-            }
-          }
-        },
-        action_items: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.INTEGER },
-              verified: { type: Type.BOOLEAN },
-              supporting_quote: { type: Type.STRING, nullable: true },
-              quote_location: { type: Type.STRING, nullable: true }
-            }
-          }
-        }
-      }
-    };
+    // 2. Extractions — delete existing then insert fresh (idempotent on retry)
+    await supabase
+      .from("extractions")
+      .delete()
+      .eq("meeting_id", meetingId);
 
-    const pass2Prompt = `You are a strict fact-checker. You have a meeting transcript and a set of extracted items.
-
-For each item, you must find a direct verbatim quote from the transcript that supports the extraction.
-
-Rules:
-- Only mark verified: true if there is CLEAR, DIRECT evidence — a specific statement in the transcript
-- Do NOT mark verified based on implication, inference, or general context
-- supporting_quote must be verbatim text from the transcript — not a paraphrase
-- If you cannot find a direct supporting quote, set verified: false and leave supporting_quote as null
-- Be strict. A false positive (marking something verified when it is not) is worse than a false negative.
-
-Extracted items:
-${JSON.stringify(pass1)}
-
-Transcript:
-${transcript}`;
-
-    let pass2: any = null;
-    try {
-      const pass2Raw = await geminiWithRetry(ai, pass2Prompt, pass2Schema);
-      pass2 = safeParseJSON<any>(pass2Raw);
-      console.log("[Stage 3] Pass 2 verification complete.");
-    } catch (err) {
-      console.warn("[Stage 3] Pass 2 failed (non-fatal) — all items will be unverified:", err);
-    }
-
-    // Build lookup maps for verification data
-    const decisionVerification = new Map<number, any>();
-    const actionVerification = new Map<number, any>();
-    if (pass2?.decisions) {
-      for (const v of pass2.decisions) decisionVerification.set(v.id, v);
-    }
-    if (pass2?.action_items) {
-      for (const v of pass2.action_items) actionVerification.set(v.id, v);
-    }
-
-    // ——— Stage 4: Merge + Insert extractions ——————————————————————————————————————
-    await supabase.from("meetings").update({ processing_stage: "merging" }).eq("id", meetingId);
-    console.log("[Stage 4] Inserting extractions…");
-
-    const extractionRows: Record<string, unknown>[] = [];
-
-    for (const d of pass1.decisions ?? []) {
-      const v = decisionVerification.get(d.id);
-      extractionRows.push({
+    const decisionRows = (combined.decisions ?? []).map((d: any) => {
+      const v =
+        verified?.decisions?.find((x: any) => x.id === d.id) ?? {};
+      return {
+        _tempId: d.id,
         meeting_id: meetingId,
         type: "decision",
         description: d.description,
-        verified: v?.verified ?? false,
-        supporting_quote: v?.supporting_quote ?? null,
-        quote_location: v?.quote_location ?? null,
-      });
-    }
+        owner: null,
+        due_date: null,
+        urgency: null,
+        context: null,
+        related_topic: null,
+        verified: v.verified ?? false,
+        supporting_quote: v.supporting_quote ?? null,
+      };
+    });
 
-    for (const a of pass1.action_items ?? []) {
-      const v = actionVerification.get(a.id);
-      extractionRows.push({
+    const actionRows = (combined.action_items ?? []).map((a: any) => {
+      const v =
+        verified?.action_items?.find((x: any) => x.id === a.id) ?? {};
+      return {
+        _tempId: a.id,
         meeting_id: meetingId,
         type: "action_item",
         description: a.description,
         owner: a.owner ?? "Unassigned",
         due_date: a.due_date ?? "Not specified",
-        urgency: a.urgency ?? "Low Priority",
+        urgency: sanitizeUrgency(a.urgency),
         context: a.context ?? null,
         related_topic: a.related_topic ?? null,
-        verified: v?.verified ?? false,
-        supporting_quote: v?.supporting_quote ?? null,
-        quote_location: v?.quote_location ?? null,
-      });
-    }
+        status: "Pending",
+        verified: v.verified ?? false,
+        supporting_quote: v.supporting_quote ?? null,
+      };
+    });
 
-    if (extractionRows.length > 0) {
-      const { error: insertErr } = await supabase.from("extractions").insert(extractionRows);
-      if (insertErr) {
-        console.error("[Stage 4] Extraction insert failed:", insertErr.message);
-        await supabase
-          .from("meetings")
-          .update({ processing_status: "failed", processing_error: insertErr.message })
-          .eq("id", meetingId);
-        return new Response(JSON.stringify({ error: insertErr.message }), { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
-      }
-      console.log(`[Stage 4] Inserted ${extractionRows.length} extractions.`);
-    }
-  } else {
-    console.log("[Stage 2-4] Extractions already exist — skipping extraction stages.");
-  }
+    const issueEventRows = (combined.issue_events ?? [])
+      .map((ev: any) => {
+        const eventType = sanitizeIssueEventType(ev.event_type);
+        if (!eventType) return null;
+        return {
+          _tempId: `event-${ev.id ?? Math.random()}`,
+          meeting_id: meetingId,
+          type: "issue_event",
+          description:
+            typeof ev.description === "string" && ev.description.trim().length > 0
+              ? ev.description.trim()
+              : `${eventType.toUpperCase()}: ${ev.issue_title ?? "Untitled issue"}`,
+          owner: null,
+          due_date: null,
+          urgency: null,
+          context: typeof ev.context === "string" ? ev.context.trim() : null,
+          related_topic: null,
+          status: null,
+          verified: true,
+          supporting_quote:
+            typeof ev.supporting_quote === "string"
+              ? ev.supporting_quote.trim()
+              : null,
+          issue_event_type: eventType,
+          issue_candidate_title:
+            typeof ev.issue_title === "string" ? ev.issue_title.trim() : null,
+        };
+      })
+      .filter(Boolean);
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // STAGE 5 — Sentiment Analysis
-  // Skip if segments already exist
-  // ————————————————————————————————————————————————————————————————————————————————
-  const { data: existingSegments } = await supabase
-    .from("sentiment_segments")
-    .select("id")
-    .eq("meeting_id", meetingId)
-    .limit(1);
+    const exRows = [...decisionRows, ...actionRows, ...issueEventRows];
+    const newDbExtractionsByMappingId = new Map<number, string>();
 
-  if (!existingSegments || existingSegments.length === 0) {
-    await supabase.from("meetings").update({ processing_stage: "analyzing_sentiment" }).eq("id", meetingId);
-    console.log("[Stage 5] Running sentiment analysis…");
-    try {
-      const sentimentSchema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-          segments: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                segment_index: { type: Type.INTEGER },
-                speaker: { type: Type.STRING },
-                text_excerpt: { type: Type.STRING },
-                sentiment_label: { type: Type.STRING },
-                sentiment_score: { type: Type.NUMBER },
-                start_time: { type: Type.STRING, nullable: true }
-              }
-            }
-          },
-          speaker_observations: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                speaker: { type: Type.STRING },
-                observation: { type: Type.STRING },
-                average_score: { type: Type.NUMBER }
-              }
-            }
+    if (exRows.length > 0) {
+      const { data: insertedEx } = await supabase
+        .from("extractions")
+        .insert(
+          exRows.map((r) => {
+            const { _tempId, ...rest } = r;
+            return rest;
+          })
+        )
+        .select("id, description, type");
+
+      // Match inserted UUIDs back to integer IDs for reconciliation
+      if (insertedEx) {
+        for (const row of exRows) {
+          const matchingDb = insertedEx.find(
+            (db: any) =>
+              db.description === row.description && db.type === row.type
+          );
+          if (matchingDb) {
+            newDbExtractionsByMappingId.set(row._tempId, matchingDb.id);
           }
         }
-      };
-
-      const sentimentPrompt = `You are analyzing the sentiment of a meeting transcript segment by segment.
-
-Divide the transcript into natural segments of approximately 15-20 dialogue lines each. For each segment, determine the overall sentiment.
-
-Sentiment labels:
-- positive: agreement, enthusiasm, constructive progress, solutions being found
-- neutral: informational, factual, transitional, procedural
-- conflict: direct disagreement, pushback, opposition, confrontation
-- frustrated: repeated concerns, expressed exasperation, feeling unheard
-- uncertain: hedging, unresolved questions, indecision, 'I'm not sure'
-- enthusiastic: strong positive energy, excitement, strong buy-in
-
-Rules:
-- sentiment_score ranges from -1.0 (very negative) to 1.0 (very positive)
-- text_excerpt must be the first 150 characters of the segment
-- speaker should be the dominant speaker in the segment, or 'Multiple' if mixed
-- Do NOT show decimal sentiment scores to the user — the UI shows only labels
-- Generate a one-line speaker_observation for the overall meeting per speaker, not per segment
-- Be heavily biased towards 'neutral'. Most business meetings are neutral. Only assign 'conflict' or 'frustrated' if there is explicit verbal evidence of tension, anger, or strong exasperation. Professional disagreement should be marked as 'neutral'.
-- Only assign 'enthusiastic' for explicit celebration or exceptional buy-in.
-
-Transcript:
-${transcript}`;
-
-      const sentimentRaw = await geminiWithRetry(ai, sentimentPrompt, sentimentSchema);
-      const sentimentData = safeParseJSON<any>(sentimentRaw);
-
-      if (sentimentData?.segments && sentimentData.segments.length > 0) {
-        const segmentRows = sentimentData.segments.map((s: any) => ({
-          meeting_id: meetingId,
-          segment_index: s.segment_index,
-          speaker: s.speaker ?? "Unknown",
-          text_excerpt: s.text_excerpt ?? null,
-          sentiment_label: s.sentiment_label,
-          sentiment_score: s.sentiment_score,
-          start_time: s.start_time ?? null,
-        }));
-
-        const { error: segErr } = await supabase
-          .from("sentiment_segments")
-          .insert(segmentRows);
-        if (segErr) {
-          console.error("[Stage 5] Segment insert error:", segErr.message);
-        } else {
-          console.log(`[Stage 5] Inserted ${segmentRows.length} sentiment segments.`);
-        }
-
-        // Store speaker observations in the summary JSONB
-        if (sentimentData.speaker_observations?.length > 0) {
-          const { data: curr } = await supabase
-            .from("meetings")
-            .select("summary")
-            .eq("id", meetingId)
-            .single();
-          const updated = {
-            ...(curr?.summary ?? {}),
-            speaker_observations: sentimentData.speaker_observations,
-          };
-          await supabase.from("meetings").update({ summary: updated }).eq("id", meetingId);
-        }
-      } else {
-        console.warn("[Stage 5] Sentiment parse returned no segments — skipping.");
       }
-    } catch (err) {
-      console.error("[Stage 5] Sentiment failed (non-fatal):", err);
     }
-  } else {
-    await supabase.from("meetings").update({ processing_stage: "analyzing_sentiment" }).eq("id", meetingId);
-    console.log("[Stage 5] Sentiment segments already exist — skipping.");
-  }
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // STAGE 6 — Issue Reconciliation
-  // Always runs (may update existing issues)
-  // ————————————————————————————————————————————————————————————————————————————————
-  await supabase.from("meetings").update({ processing_stage: "reconciling" }).eq("id", meetingId);
-  console.log("[Stage 6] Running issue reconciliation…");
-  try {
-    // Fetch existing issues for this project
-    const { data: existingIssues } = await supabase
-      .from("issues")
-      .select("id, title, description, status")
-      .eq("project_id", projectId);
-
-    // Fetch newly inserted extractions for this meeting
-    const { data: newExtractions } = await supabase
-      .from("extractions")
-      .select("id, type, description, owner, due_date, urgency, context")
+    // 3. Sentiment segments — delete existing then insert fresh
+    await supabase
+      .from("sentiment_segments")
+      .delete()
       .eq("meeting_id", meetingId);
 
-    if (!newExtractions || newExtractions.length === 0) {
-      console.log("[Stage 6] No extractions to reconcile — skipping.");
-    } else {
-      const reconciliationSchema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-          matches: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                extraction_id: { type: Type.STRING },
-                issue_id: { type: Type.STRING, nullable: true },
-                is_new_issue: { type: Type.BOOLEAN },
-                new_issue_title: { type: Type.STRING, nullable: true },
-                new_issue_description: { type: Type.STRING, nullable: true },
-                mention_type: { type: Type.STRING },
-                new_status: { type: Type.STRING },
-                context: { type: Type.STRING, nullable: true },
-                supporting_quote: { type: Type.STRING, nullable: true }
-              }
-            }
-          },
-          superseded_items: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                old_extraction_id: { type: Type.STRING },
-                new_extraction_id: { type: Type.STRING },
-                reason: { type: Type.STRING }
-              }
-            }
-          }
-        }
-      };
-
-      const reconciliationPrompt = `You are analyzing a new meeting transcript against a list of existing project issues.
-
-For each item extracted from the new meeting, determine:
-1. Does it match an existing issue? Match by topic and context — not exact wording.
-2. If yes: what happened to that issue in this meeting?
-3. If no: is this a genuinely new issue worth tracking at the project level?
-4. Does any new action item supersede (replace) an existing action item from a previous meeting?
-
-Mention types:
-- raised: issue appears for the first time
-- discussed: mentioned but no status change
-- escalated: situation worsened or became more urgent
-- resolved: explicitly closed or completed
-- obsoleted: no longer relevant due to changed circumstances
-- reopened: was previously resolved but has resurfaced
-
-Issue status transitions:
-- raised → open
-- escalated → open (urgency increases)
-- resolved → resolved
-- obsoleted → obsolete
-- reopened → open
-
-Rules:
-- Only create a new issue if it is genuinely significant at the project level — not every action item becomes an issue
-- Only create a completely NEW issue if you are absolutely certain it is a major project blocker or epic. Otherwise, attempt to match it to an existing issue, or ignore it.
-- Only mark resolved or obsoleted if there is a direct quote supporting it
-- For superseded action items: only flag superseding if the new item clearly replaces the old one (different owner, different scope, explicitly mentioned as replacing previous task)
-- If you are uncertain about a match, do not match — leave as a new issue or skip
-
-Existing issues:
-${JSON.stringify(existingIssues ?? [])}
-
-New extractions from this meeting:
-${JSON.stringify(newExtractions)}
-
-Transcript:
-${transcript}`;
-
-      const reconcileRaw = await geminiWithRetry(ai, reconciliationPrompt, reconciliationSchema);
-      const reconcileData = safeParseJSON<any>(reconcileRaw);
-
-      if (reconcileData?.matches) {
-        for (const match of reconcileData.matches) {
-          let issueId = match.issue_id;
-
-          // Create new issue if needed
-          if (match.is_new_issue && match.new_issue_title) {
-            const { data: newIssue, error: issueErr } = await supabase
-              .from("issues")
-              .insert({
-                project_id: projectId,
-                title: match.new_issue_title,
-                description: match.new_issue_description ?? null,
-                status: match.new_status ?? "open",
-                opened_in: meetingId,
-              })
-              .select("id")
-              .single();
-
-            if (issueErr || !newIssue) {
-              console.error("[Stage 6] Failed to insert new issue:", issueErr?.message);
-              continue;
-            }
-            issueId = newIssue.id;
-          } else if (issueId) {
-            // Update existing issue status
-            const statusUpdates: Record<string, unknown> = { status: match.new_status };
-            if (match.mention_type === "resolved") {
-              statusUpdates.resolved_in = meetingId;
-            } else if (match.mention_type === "obsoleted") {
-              statusUpdates.obsoleted_in = meetingId;
-            }
-            await supabase.from("issues").update(statusUpdates).eq("id", issueId);
-          }
-
-          // Insert mention
-          if (issueId) {
-            await supabase.from("issue_mentions").insert({
-              issue_id: issueId,
-              meeting_id: meetingId,
-              mention_type: match.mention_type,
-              context: match.context ?? null,
-              supporting_quote: match.supporting_quote ?? null,
-            });
-          }
-        }
-
-        // Handle superseded action items
-        if (reconcileData.superseded_items) {
-          for (const sup of reconcileData.superseded_items) {
-            if (sup.old_extraction_id && sup.new_extraction_id) {
-              await supabase
-                .from("extractions")
-                .update({ superseded_by: sup.new_extraction_id })
-                .eq("id", sup.old_extraction_id);
-            }
-          }
-        }
-
-        console.log(
-          `[Stage 6] Processed ${reconcileData.matches.length} matches, ` +
-            `${reconcileData.superseded_items?.length ?? 0} superseded items.`
-        );
-      } else {
-        console.warn("[Stage 6] Reconciliation parse returned null — skipping.");
-      }
+    if (combined?.sentiment?.segments?.length > 0) {
+      const segRows = combined.sentiment.segments.map((s: any) => ({
+        meeting_id: meetingId,
+        segment_index: s.segment_index,
+        speaker: s.speaker ?? "Unknown",
+        text_excerpt: s.text_excerpt ?? null,
+        sentiment_label: sanitizeSentimentLabel(s.sentiment_label),
+        sentiment_score: s.sentiment_score,
+        start_time: s.start_time ?? null,
+      }));
+      await supabase.from("sentiment_segments").insert(segRows);
     }
+
   } catch (err) {
-    console.error("[Stage 6] Reconciliation failed (non-fatal):", err);
+    console.error("[Insert Phase] DB Error:", err);
   }
 
-  // ————————————————————————————————————————————————————————————————————————————————
-  // COMPLETE
-  // ————————————————————————————————————————————————————————————————————————————————
+  // ──────────────────────────────────────────────────────────────────────
+  // PHASE 1 COMPLETE
+  // We decoupled Call 3 (Reconciliation). That is now handled sequentially
+  // by reconcile-project. We just mark this meeting as extracted.
+  // ──────────────────────────────────────────────────────────────────────
   await supabase
     .from("meetings")
-    .update({ processing_status: "complete", processing_stage: "reconciling" })
+    .update({ processing_status: "processing", processing_stage: "ready_to_reconcile" })
     .eq("id", meetingId);
 
-  console.log(`[process-transcript] ✅ Meeting ${meetingId} processing complete.`);
+  await triggerReconcileProject(
+    projectId,
+    isHistoricalInsert ? "full" : "incremental",
+    [meetingId],
+    {
+      analysisRunId: analysisRunId ?? undefined,
+      reconcilePromptVariant,
+      reconcileModelOverride: reconcileModelOverride ?? undefined,
+    }
+  );
+     
+  console.log(
+    `[process-transcript] ✅ Meeting ${meetingId} extraction complete. Ready to reconcile.`
+  );
 
-  return new Response(JSON.stringify({ success: true, meetingId }), { headers: { "Content-Type": "application/json", ...CORS_HEADERS } });
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
 });

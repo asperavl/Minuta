@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient, createSupabaseServiceClient } from '@/lib/supabase'
 import { parseTranscript } from '@/lib/parser'
 
+// ── Filename date auto-detection ──────────────────────────────────────────────
+function extractDateFromFilename(filename: string): string | null {
+  // Zoom: GMT20240315-140000_Recording.transcript.vtt
+  const zoomMatch = filename.match(/GMT(\d{4})(\d{2})(\d{2})/);
+  if (zoomMatch) return `${zoomMatch[1]}-${zoomMatch[2]}-${zoomMatch[3]}`;
+
+  // Google Meet: Meeting transcript - 2024-03-15
+  const isoMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+
+  // Common: 03-15-2024 or 03_15_2024
+  const usMatch = filename.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+  if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]}`;
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   // ── Auth check ─────────────────────────────────────────────────────────────
   const supabaseAuth = await createSupabaseServerClient()
@@ -22,8 +39,12 @@ export async function POST(request: NextRequest) {
   const projectId = formData.get('projectId') as string | null
 
   if (!file || !projectId) {
-    return NextResponse.json({ error: 'Missing file or projectId' }, { status: 400 })
+    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
+
+  // ── Auto-detect date from filename, fall back to optional FormData value ────
+  const autoDate = extractDateFromFilename(file.name);
+  const meetingDate = formData.get('meetingDate') as string | null || autoDate || null;
 
   // ── Validate file extension ─────────────────────────────────────────────────
   const fileName = file.name.toLowerCase()
@@ -61,6 +82,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
 
+  // ── Get next sort_order for this project ────────────────────────────────────
+  const { data: maxRow } = await supabase
+    .from('meetings')
+    .select('sort_order')
+    .eq('project_id', projectId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .single()
+
+  let finalSortOrder = (maxRow?.sort_order ?? 0) + 1;
+  let isHistoricalInsert = false;
+  
+  const intendedSortOrderRaw = formData.get('intendedSortOrder') as string | null;
+  if (intendedSortOrderRaw) {
+    const intended = parseInt(intendedSortOrderRaw, 10);
+    if (!isNaN(intended) && intended < finalSortOrder) {
+      finalSortOrder = intended;
+      isHistoricalInsert = true;
+      
+      // We must shift all physical subsequent meetings down by 1 to make physical space.
+      // Since Supabase REST doesn't natively support bulk relative updates (sort_order = sort_order + 1),
+      // we fetch the downstream elements and update them explicitly.
+      const { data: downstream } = await supabase
+        .from('meetings')
+        .select('id, sort_order')
+        .eq('project_id', projectId)
+        .gte('sort_order', finalSortOrder);
+      
+      if (downstream && downstream.length > 0) {
+        const updates = downstream.map((m: { id: string; sort_order: number | null }) =>
+          supabase.from('meetings').update({ sort_order: m.sort_order! + 1 }).eq('id', m.id)
+        );
+        await Promise.all(updates);
+      }
+    }
+  }
+
   // ── Insert meeting row ──────────────────────────────────────────────────────
   const { data: meeting, error: insertError } = await supabase
     .from('meetings')
@@ -68,6 +126,8 @@ export async function POST(request: NextRequest) {
       project_id: projectId,
       file_name: file.name,
       raw_text: parsed.rawText,
+      meeting_date: meetingDate,
+      sort_order: finalSortOrder,
       word_count: parsed.wordCount,
       speaker_count: parsed.speakers.length,
       processing_status: 'processing',
@@ -94,7 +154,7 @@ export async function POST(request: NextRequest) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
     },
-    body: JSON.stringify({ meetingId }),
+    body: JSON.stringify({ meetingId, isHistoricalInsert }),
   }).catch((err) => {
     console.error('[upload] Edge Function trigger failed:', err)
   })
