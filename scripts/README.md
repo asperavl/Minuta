@@ -38,3 +38,13 @@ npm run replay:matrix
 ```
 
 Writes a ranked JSON report in `artifacts/analysis/`.
+
+## Quote Location Backfill
+
+Backfills `extractions.quote_location` for existing `decision` and `action_item` rows that have a `supporting_quote` but missing location.
+
+```bash
+npm run backfill:quote-locations
+```
+
+The script enforces a deterministic coverage gate and exits non-zero if coverage is below 95%.

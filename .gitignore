@@ -68,3 +68,6 @@ next-env.d.ts
 /test_reconciler.cjs
 /test_reconciler.mjs
 /test_reconciler.ts
+
+
+check-errors.js

@@ -29,6 +29,7 @@ type MeetingCardProps = {
   meeting: Meeting;
   /** If set, the card is a polling-active card (no link navigation) */
   onStatusChange?: (meetingId: string, newStatus: Meeting["processing_status"]) => void;
+  onDelete?: () => void;
 };
 
 const SENTIMENT_COLORS: Record<string, string> = {
@@ -45,10 +46,11 @@ const SENTIMENT_BG: Record<string, string> = {
   negative: "rgba(226,75,74,0.12)",
 };
 
-export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProps) {
+export default function MeetingCard({ meeting, onStatusChange, onDelete }: MeetingCardProps) {
   const supabase = createSupabaseBrowserClient();
   const pollingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const [currentMeeting, setCurrentMeeting] = useState<Meeting>(meeting);
+  const [deleting, setDeleting] = useState(false);
 
   // Start polling if not complete/failed
   useEffect(() => {
@@ -114,7 +116,7 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
 
   // ── Pending ─────────────────────────────────────────────────────────────────
   if (status === "pending") {
-    return <PendingCard fileName={currentMeeting.file_name} />;
+    return <PendingCard fileName={currentMeeting.file_name} onDelete={onDelete} />;
   }
 
   // ── Processing ──────────────────────────────────────────────────────────────
@@ -124,7 +126,7 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
 
   // ── Failed ──────────────────────────────────────────────────────────────────
   if (status === "failed") {
-    return <FailedCard fileName={currentMeeting.file_name} onRetry={handleRetry} />;
+    return <FailedCard fileName={currentMeeting.file_name} onRetry={handleRetry} onDelete={onDelete} />;
   }
 
   // ── Complete ────────────────────────────────────────────────────────────────
@@ -146,16 +148,13 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
       : null;
 
   return (
-    <a
-      href={`/meetings/${currentMeeting.id}`}
+    <div
       style={{
-        display: "block",
-        textDecoration: "none",
+        position: "relative",
         background: "var(--surface)",
         border: "1px solid var(--border)",
         borderRadius: "0.875rem",
         padding: "1.25rem 1.5rem",
-        cursor: "pointer",
         transition: "border-color 0.15s, transform 0.15s",
       }}
       onMouseEnter={(e) => {
@@ -167,93 +166,146 @@ export default function MeetingCard({ meeting, onStatusChange }: MeetingCardProp
         e.currentTarget.style.transform = "translateY(0)";
       }}
     >
-      {/* Header row */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", marginBottom: "0.875rem" }}>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: "0.9375rem",
-              color: "var(--foreground)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              marginBottom: "0.25rem",
-            }}
-          >
-            {currentMeeting.file_name}
+      <a
+        href={`/meetings/${currentMeeting.id}`}
+        style={{
+          display: "block",
+          textDecoration: "none",
+          color: "inherit",
+          width: "100%",
+          height: "100%",
+        }}
+      >
+        {/* Header row */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", marginBottom: "0.875rem", paddingRight: onDelete ? "2.25rem" : undefined }}>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: "0.9375rem",
+                color: "var(--foreground)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                marginBottom: "0.25rem",
+              }}
+            >
+              {currentMeeting.file_name}
+            </div>
+            <div style={{ fontSize: "0.78125rem", color: "var(--muted)", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+              {date && <span>{date}</span>}
+              {currentMeeting.word_count && <span>{currentMeeting.word_count.toLocaleString()} words</span>}
+              {currentMeeting.speaker_count != null && currentMeeting.speaker_count > 0 && (
+                <span>{currentMeeting.speaker_count} speaker{currentMeeting.speaker_count !== 1 ? "s" : ""}</span>
+              )}
+            </div>
           </div>
-          <div style={{ fontSize: "0.78125rem", color: "var(--muted)", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-            {date && <span>{date}</span>}
-            {currentMeeting.word_count && <span>{currentMeeting.word_count.toLocaleString()} words</span>}
-            {currentMeeting.speaker_count != null && currentMeeting.speaker_count > 0 && (
-              <span>{currentMeeting.speaker_count} speaker{currentMeeting.speaker_count !== 1 ? "s" : ""}</span>
-            )}
-          </div>
-        </div>
 
-        {/* Sentiment badge */}
-        {sentiment && (
-          <div
-            style={{
-              flexShrink: 0,
-              padding: "0.25rem 0.625rem",
-              borderRadius: "999px",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: SENTIMENT_COLORS[sentiment.label] ?? "var(--muted)",
-              background: SENTIMENT_BG[sentiment.label] ?? "var(--surface-2)",
-              border: `1px solid ${SENTIMENT_COLORS[sentiment.label] ?? "var(--border)"}`,
-              textTransform: "capitalize",
-            }}
-          >
-            {sentiment.label}
-          </div>
-        )}
-      </div>
-
-      {/* TL;DR */}
-      {summary?.tldr && (
-        <p
-          style={{
-            fontSize: "0.875rem",
-            color: "var(--muted)",
-            lineHeight: 1.6,
-            margin: "0 0 0.875rem",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {summary.tldr}
-        </p>
-      )}
-
-      {/* Stats row */}
-      {stats && (
-        <div
-          style={{
-            display: "flex",
-            gap: "1.25rem",
-            paddingTop: "0.75rem",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <StatPill label="Decisions" value={stats.decisions ?? 0} />
-          <StatPill label="Action Items" value={stats.action_items ?? 0} />
-          {summary?.topics && (
-            <StatPill label="Topics" value={summary.topics.length} />
+          {/* Sentiment badge */}
+          {sentiment && (
+            <div
+              style={{
+                flexShrink: 0,
+                padding: "0.25rem 0.625rem",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                color: SENTIMENT_COLORS[sentiment.label] ?? "var(--muted)",
+                background: SENTIMENT_BG[sentiment.label] ?? "var(--surface-2)",
+                border: `1px solid ${SENTIMENT_COLORS[sentiment.label] ?? "var(--border)"}`,
+                textTransform: "capitalize",
+              }}
+            >
+              {sentiment.label}
+            </div>
           )}
         </div>
+
+        {/* TL;DR */}
+        {summary?.tldr && (
+          <p
+            style={{
+              fontSize: "0.875rem",
+              color: "var(--muted)",
+              lineHeight: 1.6,
+              margin: "0 0 0.875rem",
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {summary.tldr}
+          </p>
+        )}
+
+        {/* Stats row */}
+        {stats && (
+          <div
+            style={{
+              display: "flex",
+              gap: "1.25rem",
+              paddingTop: "0.75rem",
+              borderTop: "1px solid var(--border)",
+            }}
+          >
+            <StatPill label="Decisions" value={stats.decisions ?? 0} />
+            <StatPill label="Action Items" value={stats.action_items ?? 0} />
+            {summary?.topics && (
+              <StatPill label="Topics" value={summary.topics.length} />
+            )}
+          </div>
+        )}
+      </a>
+      
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (window.confirm("Are you sure you want to delete this meeting? This cannot be undone.")) {
+              setDeleting(true);
+              onDelete();
+            }
+          }}
+          disabled={deleting}
+          style={{
+            position: "absolute",
+            top: "1.25rem",
+            right: "1.25rem",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "0.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "0.4rem",
+            zIndex: 2,
+            transition: "all 0.15s",
+            opacity: deleting ? 0.5 : 1,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--danger)";
+            e.currentTarget.style.background = "rgba(226,75,74,0.12)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--muted)";
+            e.currentTarget.style.background = "none";
+          }}
+          title="Delete Meeting"
+        >
+          <TrashIcon />
+        </button>
       )}
-    </a>
+    </div>
   );
 }
 
 // ── Sub-states ───────────────────────────────────────────────────────────────
 
-function PendingCard({ fileName }: { fileName: string }) {
+function PendingCard({ fileName, onDelete }: { fileName: string; onDelete?: () => void }) {
   return (
     <div
       style={{
@@ -267,7 +319,7 @@ function PendingCard({ fileName }: { fileName: string }) {
       }}
     >
       <PendingIcon />
-      <div style={{ minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
             fontWeight: 600,
@@ -284,6 +336,26 @@ function PendingCard({ fileName }: { fileName: string }) {
           Queued for processing
         </div>
       </div>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "0.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "0.4rem",
+            transition: "all 0.15s",
+          }}
+          title="Delete Meeting"
+        >
+          <TrashIcon />
+        </button>
+      )}
     </div>
   );
 }
@@ -347,7 +419,7 @@ function ProcessingCard({ fileName }: { fileName: string }) {
   );
 }
 
-function FailedCard({ fileName, onRetry }: { fileName: string; onRetry: () => void }) {
+function FailedCard({ fileName, onRetry, onDelete }: { fileName: string; onRetry: () => void; onDelete?: () => void }) {
   return (
     <div
       style={{
@@ -395,6 +467,26 @@ function FailedCard({ fileName, onRetry }: { fileName: string; onRetry: () => vo
       >
         Retry
       </button>
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "0.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "0.4rem",
+            transition: "all 0.15s",
+          }}
+          title="Delete Meeting"
+        >
+          <TrashIcon />
+        </button>
+      )}
     </div>
   );
 }
@@ -443,6 +535,28 @@ function PendingIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
       <circle cx="12" cy="12" r="10" stroke="var(--muted)" strokeWidth="2" />
       <path d="M12 6v6l4 2" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ width: "1.125rem", height: "1.125rem" }}
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
   );
 }

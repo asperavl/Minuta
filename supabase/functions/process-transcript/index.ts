@@ -174,6 +174,141 @@ function sanitizeSentimentLabel(raw: string | null | undefined): string {
   return 'neutral';
 }
 
+function normalizeSearchText(raw: string): string {
+  return String(raw ?? "")
+    .toLowerCase()
+    .replace(/[“”"']/g, "")
+    .replace(/[^a-z0-9\s:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeSearch(raw: string): string[] {
+  return normalizeSearchText(raw)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+}
+
+function tokenRecallScore(quoteTokens: string[], candidateTokens: string[]): number {
+  if (quoteTokens.length === 0 || candidateTokens.length === 0) return 0;
+  const candidateSet = new Set(candidateTokens);
+  let overlap = 0;
+  for (const token of quoteTokens) {
+    if (candidateSet.has(token)) overlap += 1;
+  }
+  return overlap / quoteTokens.length;
+}
+
+function normalizeTimestamp(raw: string): string | null {
+  const trimmed = raw.trim();
+  const hhmmssMatch = trimmed.match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (hhmmssMatch) {
+    const hh = hhmmssMatch[1].padStart(2, "0");
+    return `${hh}:${hhmmssMatch[2]}:${hhmmssMatch[3]}`;
+  }
+  const mmssMatch = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (mmssMatch) {
+    return `00:${mmssMatch[1].padStart(2, "0")}:${mmssMatch[2]}`;
+  }
+  return null;
+}
+
+function extractTimestampFromLine(line: string): string | null {
+  const cueMatch = line.match(/(\d{1,2}:\d{2}:\d{2})(?:[.,]\d{1,3})?\s*-->/);
+  if (cueMatch) return normalizeTimestamp(cueMatch[1]);
+
+  const hhmmssMatch = line.match(/\b(\d{1,2}:\d{2}:\d{2})(?:[.,]\d{1,3})?\b/);
+  if (hhmmssMatch) return normalizeTimestamp(hhmmssMatch[1]);
+
+  const mmssMatch = line.match(/\b(\d{1,2}:\d{2})(?:[.,]\d{1,3})?\b/);
+  if (mmssMatch) return normalizeTimestamp(mmssMatch[1]);
+
+  return null;
+}
+
+function lineForCharIndex(rawText: string, charIndex: number): number {
+  let line = 1;
+  for (let i = 0; i < charIndex; i += 1) {
+    if (rawText[i] === "\n") line += 1;
+  }
+  return line;
+}
+
+function quoteLineNumber(rawText: string, supportingQuote: string): number | null {
+  const quote = supportingQuote.trim();
+  if (!quote) return null;
+
+  const loweredRaw = rawText.toLowerCase();
+  const loweredQuote = quote.toLowerCase();
+  const exactIndex = loweredRaw.indexOf(loweredQuote);
+  if (exactIndex >= 0) {
+    return lineForCharIndex(rawText, exactIndex);
+  }
+
+  const lines = rawText.split(/\r?\n/);
+  const normalizedQuote = normalizeSearchText(quote);
+  if (!normalizedQuote) return null;
+
+  const quoteTokens = tokenizeSearch(quote);
+  let bestLine: number | null = null;
+  let bestScore = 0;
+
+  for (let windowSize = 1; windowSize <= 10; windowSize += 1) {
+    for (let i = 0; i < lines.length; i += 1) {
+      const windowText = lines.slice(i, i + windowSize).join(" ");
+      const normalizedWindow = normalizeSearchText(windowText);
+      if (!normalizedWindow) continue;
+
+      if (
+        normalizedWindow.includes(normalizedQuote) ||
+        normalizedQuote.includes(normalizedWindow)
+      ) {
+        return i + 1;
+      }
+
+      if (quoteTokens.length > 0) {
+        const score = tokenRecallScore(quoteTokens, tokenizeSearch(windowText));
+        if (score > bestScore) {
+          bestScore = score;
+          bestLine = i + 1;
+        }
+      }
+    }
+  }
+
+  const threshold = quoteTokens.length >= 6 ? 0.5 : 0.66;
+  if (bestLine != null && bestScore >= threshold) return bestLine;
+  return null;
+}
+
+function resolveQuoteLocation(
+  rawText: string | null | undefined,
+  supportingQuote: string | null | undefined
+): string | null {
+  if (!rawText || !supportingQuote) return null;
+  const quote = supportingQuote.trim();
+  if (!quote) return null;
+
+  const lineNumber = quoteLineNumber(rawText, quote);
+  if (!lineNumber) return null;
+
+  const lines = rawText.split(/\r?\n/);
+  const index = Math.min(Math.max(lineNumber - 1, 0), Math.max(lines.length - 1, 0));
+
+  let timestamp: string | null = null;
+  for (let offset = 0; offset <= 8; offset += 1) {
+    const lineIndex = index - offset;
+    if (lineIndex < 0) break;
+    timestamp = extractTimestampFromLine(lines[lineIndex]);
+    if (timestamp) break;
+  }
+
+  if (timestamp) {
+    return `${timestamp} (line ${lineNumber})`;
+  }
+  return `Line ${lineNumber}`;
+}
+
 const VALID_ISSUE_EVENT_TYPES = new Set([
   "raised",
   "resolved",
@@ -371,6 +506,15 @@ Rules:
 - due_date: use Not specified if no date was mentioned — never infer
 - speaker_breakdown percentages must sum to 100
 - Divide transcript into natural segments of 15-20 dialogue lines each for sentiment
+- SENTIMENT CALIBRATION (CRITICAL):
+  - Do NOT average emotion out to 'neutral'. Grade the segment based on the single most intense emotional *peak* (Peak-Hold rule).
+  - Explicit bounds: Exclamations of distress ("oh no", "yikes", "shoot", "this is broken") MUST be labeled 'frustrated' or 'conflict' with a negative score (-0.5 to -1.0).
+  - 'neutral' (0.0) is strictly for purely informational statements with zero emotional charge.
+  - 'uncertain' (-0.2 to -0.4) is for hesitation ("umm", "I don't know").
+  - Few-Shot Examples:
+    - "Oh no, the deployment failed again." -> Label: frustrated, Score: -0.8
+    - "I'll push the code up later today." -> Label: neutral, Score: 0.0
+    - "I'm not sure if that will work, maybe?" -> Label: uncertain, Score: -0.3
 - temperature is 0 — output must be precise and consistent
 - The topics array must include every issue-level discussion (bugs, blockers, incidents, major risks, major feature requests, explicit closures/reopens)
 - Do not collapse separate issue-level discussions into one topic
@@ -745,6 +889,10 @@ Deno.serve(async (req) => {
     const decisionRows = (combined.decisions ?? []).map((d: any) => {
       const v =
         verified?.decisions?.find((x: any) => x.id === d.id) ?? {};
+      const supportingQuote =
+        typeof v.supporting_quote === "string" && v.supporting_quote.trim().length > 0
+          ? v.supporting_quote.trim()
+          : null;
       return {
         _tempId: d.id,
         meeting_id: meetingId,
@@ -756,13 +904,18 @@ Deno.serve(async (req) => {
         context: null,
         related_topic: null,
         verified: v.verified ?? false,
-        supporting_quote: v.supporting_quote ?? null,
+        supporting_quote: supportingQuote,
+        quote_location: resolveQuoteLocation(transcript, supportingQuote),
       };
     });
 
     const actionRows = (combined.action_items ?? []).map((a: any) => {
       const v =
         verified?.action_items?.find((x: any) => x.id === a.id) ?? {};
+      const supportingQuote =
+        typeof v.supporting_quote === "string" && v.supporting_quote.trim().length > 0
+          ? v.supporting_quote.trim()
+          : null;
       return {
         _tempId: a.id,
         meeting_id: meetingId,
@@ -775,7 +928,8 @@ Deno.serve(async (req) => {
         related_topic: a.related_topic ?? null,
         status: "Pending",
         verified: v.verified ?? false,
-        supporting_quote: v.supporting_quote ?? null,
+        supporting_quote: supportingQuote,
+        quote_location: resolveQuoteLocation(transcript, supportingQuote),
       };
     });
 

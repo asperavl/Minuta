@@ -297,9 +297,22 @@ function sanitizeIssueEventType(raw: string | null | undefined): string | null {
   return VALID_EVENT_TYPES.has(normalized) ? normalized : null;
 }
 
+function hasSupportingQuote(quote: string | null | undefined): boolean {
+  return typeof quote === "string" && quote.trim().length > 0;
+}
+
 function supportingQuoteLooksResolved(quote: string | null | undefined): boolean {
   if (!quote) return false;
   return RESOLUTION_HINT_RE.test(quote);
+}
+
+function isIgnoredContext(context: string | null | undefined): boolean {
+  if (!context) return false;
+  return context.trim().toUpperCase().startsWith("IGNORED:");
+}
+
+function isLifecycleMentionType(mentionType: string): boolean {
+  return mentionType === "resolved" || mentionType === "reopened" || mentionType === "obsoleted";
 }
 
 function topicLooksResolved(item: ReconItem | null | undefined): boolean {
@@ -696,10 +709,16 @@ async function runGarbageCollectionAndRepair(
       statusPatch.status = "obsolete";
       statusPatch.obsoleted_in = latest.meetingId;
       statusPatch.resolved_in = null;
-    } else {
+    } else if (
+      latest?.mentionType === "reopened" ||
+      latest?.mentionType === "raised" ||
+      latest?.mentionType === "escalated"
+    ) {
       statusPatch.status = "open";
       statusPatch.resolved_in = null;
       statusPatch.obsoleted_in = null;
+    } else {
+      // For "discussed" (and unknown) mentions, keep the current lifecycle status.
     }
 
     await supabase.from("issues").update(statusPatch).eq("id", issueId);
@@ -849,6 +868,9 @@ async function runReconciliationMode(
     for (const ev of issueEvents) {
       const eventType = sanitizeIssueEventType(ev.issue_event_type);
       if (!eventType) continue;
+      if (!hasSupportingQuote(ev.supporting_quote)) {
+        continue;
+      }
       if (eventType === "resolved" && !supportingQuoteLooksResolved(ev.supporting_quote)) {
         continue;
       }
@@ -991,6 +1013,16 @@ async function runReconciliationMode(
         typeof match?.supporting_quote === "string"
           ? match.supporting_quote.trim()
           : null;
+      const hasQuoteEvidence = hasSupportingQuote(supportingQuote);
+      const ignoredByModel = isIgnoredContext(context);
+
+      if (ignoredByModel) {
+        usedExtractionIds.add(extractionId);
+        continue;
+      }
+      if (!hasQuoteEvidence) {
+        continue;
+      }
 
       if (!issueId) {
         const basis = `${sourceItem.title ?? ""} ${sourceItem.description ?? ""} ${context ?? ""} ${supportingQuote ?? ""} ${newIssueTitle}`;
@@ -1063,11 +1095,21 @@ async function runReconciliationMode(
         const key = normalizeText(newIssue.title);
         if (key) normalizedTitleToIssueId.set(key, newIssue.id);
         createdIssueCount += 1;
-      } else if (issueId) {
-        const statusUpdates: any = { status: newStatus };
-        if (mentionType === "resolved") statusUpdates.resolved_in = meetingId;
-        else if (mentionType === "obsoleted") statusUpdates.obsoleted_in = meetingId;
-        else if (mentionType === "reopened") statusUpdates.resolved_in = null;
+      } else if (issueId && isLifecycleMentionType(mentionType)) {
+        const statusUpdates: any = {};
+        if (mentionType === "resolved") {
+          statusUpdates.status = "resolved";
+          statusUpdates.resolved_in = meetingId;
+          statusUpdates.obsoleted_in = null;
+        } else if (mentionType === "obsoleted") {
+          statusUpdates.status = "obsolete";
+          statusUpdates.obsoleted_in = meetingId;
+          statusUpdates.resolved_in = null;
+        } else if (mentionType === "reopened") {
+          statusUpdates.status = "open";
+          statusUpdates.resolved_in = null;
+          statusUpdates.obsoleted_in = null;
+        }
 
         const { error: updateErr } = await supabase
           .from("issues")
@@ -1142,8 +1184,14 @@ async function runReconciliationMode(
       if (topicLooksResolved(topic)) continue;
       if (!topicLooksIssueSignal(topic)) continue;
 
+      const fallbackQuote =
+        typeof topic.supporting_quote === "string" ? topic.supporting_quote.trim() : null;
+      if (!hasSupportingQuote(fallbackQuote)) {
+        continue;
+      }
+
       unmatchedIssueLevelTopics += 1;
-      const basis = `${topic.title ?? ""} ${topic.description ?? ""} ${topic.supporting_quote ?? ""}`;
+      const basis = `${topic.title ?? ""} ${topic.description ?? ""} ${fallbackQuote ?? ""}`;
       let issueId: string | null = null;
       let mentionType: "raised" | "discussed" | "reopened" = "raised";
 
@@ -1161,6 +1209,7 @@ async function runReconciliationMode(
         if (mentionType === "reopened") {
           statusPatch.status = "open";
           statusPatch.resolved_in = null;
+          statusPatch.obsoleted_in = null;
         } else if (matchedIssue.status == null) {
           statusPatch.status = "open";
         }
@@ -1212,7 +1261,7 @@ async function runReconciliationMode(
         meeting_id: meetingId,
         mention_type: mentionType,
         context: "Deterministic fallback: unresolved issue-level topic.",
-        supporting_quote: topic.supporting_quote ?? null,
+        supporting_quote: fallbackQuote,
       });
       if (!mentionErr) {
         usedExtractionIds.add(topic.id);
