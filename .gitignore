@@ -38,3 +38,33 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase local cli metadata
+/supabase/.temp/
+
+# replay / analysis outputs
+/artifacts/
+
+# local debug dumps (root-level)
+/dbg.log
+/debug.log
+/debug.json
+/debug-output.json
+/db_*.json
+/db_*.log
+/error*.log
+/issues_*.json
+/llm_out*.json
+/logs.txt
+/models.json
+/summary*.json
+/summary*.log
+/temp.txt
+/test*.log
+/test_current_issues*.json
+/test_parse.js
+/test_query.js
+/test_query.ts
+/test_reconciler.cjs
+/test_reconciler.mjs
+/test_reconciler.ts
