@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Project = {
   id: string;
@@ -262,18 +264,49 @@ export default function DashboardPage() {
         {loading ? (
           <div
             style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              padding: "5rem",
-              color: "var(--muted)",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: "1rem",
             }}
           >
-            <SpinnerIcon />
-            <span style={{ marginLeft: "0.625rem" }}>Loading…</span>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ProjectCardSkeleton key={i} />
+            ))}
           </div>
         ) : projects.length === 0 ? (
-          <EmptyState onNew={() => setShowModal(true)} />
+          <EmptyState 
+            title="No projects yet"
+            description="Create a project to organize your meetings and start extracting insights."
+            icon={<FolderIcon size={28} color="var(--muted)" />}
+            action={
+              <button
+                onClick={() => setShowModal(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  padding: "0.625rem 1.5rem",
+                  borderRadius: "0.5rem",
+                  background: "var(--accent)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: "0.9375rem",
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "var(--accent-hover)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "var(--accent)")
+                }
+              >
+                <PlusIcon />
+                Create your first project
+              </button>
+            }
+          />
         ) : (
           <div
             style={{
@@ -621,72 +654,39 @@ function ProjectCard({
   );
 }
 
-function EmptyState({ onNew }: { onNew: () => void }) {
+function ProjectCardSkeleton() {
   return (
     <div
       style={{
-        textAlign: "center",
-        padding: "5rem 2rem",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "0.75rem",
+        padding: "1.25rem 1.5rem",
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        gap: "1rem",
+        gap: "0.875rem",
       }}
     >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem" }}>
+        <Skeleton className="w-[36px] h-[36px] rounded-lg" />
+        <Skeleton className="w-5 h-5 rounded" />
+      </div>
+      <div>
+        <Skeleton className="h-5 w-48 mb-1" />
+        <Skeleton className="h-3 w-32" />
+      </div>
       <div
         style={{
-          width: "64px",
-          height: "64px",
-          borderRadius: "1rem",
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          marginBottom: "0.25rem",
+          justifyContent: "space-between",
+          paddingTop: "0.75rem",
+          borderTop: "1px solid var(--border)",
         }}
       >
-        <FolderIcon size={28} color="var(--muted)" />
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-7 w-24 rounded-md" />
       </div>
-      <div
-        style={{
-          fontSize: "1.125rem",
-          fontWeight: 700,
-          color: "var(--foreground)",
-        }}
-      >
-        No projects yet
-      </div>
-      <div style={{ fontSize: "0.9375rem", color: "var(--muted)", maxWidth: "320px" }}>
-        Create a project to organize your meetings and start extracting insights.
-      </div>
-      <button
-        onClick={onNew}
-        style={{
-          marginTop: "0.5rem",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.5rem",
-          padding: "0.625rem 1.5rem",
-          borderRadius: "0.5rem",
-          background: "var(--accent)",
-          color: "#fff",
-          fontWeight: 600,
-          fontSize: "0.9375rem",
-          border: "none",
-          cursor: "pointer",
-          transition: "background 0.15s",
-        }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--accent-hover)")
-        }
-        onMouseLeave={(e) =>
-          (e.currentTarget.style.background = "var(--accent)")
-        }
-      >
-        <PlusIcon />
-        Create your first project
-      </button>
     </div>
   );
 }

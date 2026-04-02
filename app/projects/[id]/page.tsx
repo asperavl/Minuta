@@ -22,7 +22,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import MeetingCard from "@/components/MeetingCard";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { Skeleton } from "@/components/ui/skeleton";
+import MeetingCard, { MeetingCardSkeleton } from "@/components/MeetingCard";
 import ChatPanel from "@/components/ChatPanel";
 import { ProcessingCard, StagedCard, StagedFile, UploadedMeeting } from "@/components/UploadZone";
 import ActionItemsTable from "@/components/ActionItemsTable";
@@ -1049,18 +1051,44 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   if (loading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "var(--background)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--muted)",
-        }}
-      >
-        <LoadingSpinner />
-        <span style={{ marginLeft: "0.625rem" }}>Loading project...</span>
+      <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0.65rem 2rem",
+            minHeight: "60px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--surface)",
+          }}
+        >
+          <Skeleton className="h-6 w-32" />
+        </header>
+        <main
+          style={{
+            flex: 1,
+            maxWidth: "1040px",
+            width: "100%",
+            margin: "0 auto",
+            padding: "2.2rem 2rem 2.6rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.2rem",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+            <Skeleton className="h-10 w-24 rounded-lg" />
+            <Skeleton className="h-10 w-24 rounded-lg" />
+            <Skeleton className="h-10 w-24 rounded-lg" />
+            <Skeleton className="h-10 w-24 rounded-lg" />
+          </div>
+          <Skeleton className="h-32 w-full rounded-xl mb-4" />
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.86rem" }}>
+             <MeetingCardSkeleton />
+             <MeetingCardSkeleton />
+          </div>
+        </main>
       </div>
     );
   }
@@ -1212,6 +1240,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       </header>
 
       <main
+        className="project-main"
         style={{
           flex: 1,
           maxWidth: "1040px",
@@ -1225,93 +1254,27 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           gap: "1.2rem",
         }}
       >
-        <section>
+        {reconcileBanner && (
           <div
-            {...getRootProps()}
             style={{
-              border: `2px dashed ${isDragActive ? "var(--accent)" : "var(--border)"}`,
-              borderRadius: "0.875rem",
-              padding: "2.15rem 1.95rem",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "0.75rem",
-              cursor: "pointer",
-              background: isDragActive ? "var(--accent-subtle)" : "var(--surface)",
-              transition: "border-color 0.2s, background 0.2s",
+              marginTop: "0.7rem",
+              padding: "0.62rem 0.86rem",
+              borderRadius: "0.5rem",
+              background:
+                reconcileBanner.tone === "danger"
+                  ? "rgba(248,113,113,0.08)"
+                  : "rgba(99,102,241,0.08)",
+              border:
+                reconcileBanner.tone === "danger"
+                  ? "1px solid rgba(248,113,113,0.25)"
+                  : "1px solid rgba(99,102,241,0.25)",
+              color: reconcileBanner.tone === "danger" ? "var(--danger)" : "var(--foreground)",
+              fontSize: "0.84rem",
             }}
           >
-            <input {...getInputProps()} />
-            <UploadIcon active={isDragActive} />
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 600, fontSize: "0.9375rem", color: "var(--foreground)", marginBottom: "0.25rem" }}>
-                {isDragActive ? "Drop your transcript here" : "Upload a transcript"}
-              </div>
-              <div style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>
-                Drag and drop or click to browse - .txt or .vtt only
-              </div>
-            </div>
+            {reconcileBanner.text}
           </div>
-
-          {globalError && (
-            <div
-              style={{
-                marginTop: "0.75rem",
-                padding: "0.62rem 0.86rem",
-                borderRadius: "0.5rem",
-                background: "rgba(248,113,113,0.08)",
-                border: "1px solid rgba(248,113,113,0.25)",
-                color: "var(--danger)",
-                fontSize: "0.84rem",
-              }}
-            >
-              {globalError}
-            </div>
-          )}
-
-          {reconcileBanner && (
-            <div
-              style={{
-                marginTop: "0.7rem",
-                padding: "0.62rem 0.86rem",
-                borderRadius: "0.5rem",
-                background:
-                  reconcileBanner.tone === "danger"
-                    ? "rgba(248,113,113,0.08)"
-                    : "rgba(99,102,241,0.08)",
-                border:
-                  reconcileBanner.tone === "danger"
-                    ? "1px solid rgba(248,113,113,0.25)"
-                    : "1px solid rgba(99,102,241,0.25)",
-                color: reconcileBanner.tone === "danger" ? "var(--danger)" : "var(--foreground)",
-                fontSize: "0.84rem",
-              }}
-            >
-              {reconcileBanner.text}
-            </div>
-          )}
-
-          {showAnalyzeAll && (
-            <button
-              onClick={() => void analyzeAll()}
-              style={{
-                marginTop: "0.75rem",
-                width: "100%",
-                padding: "0.62rem",
-                borderRadius: "0.62rem",
-                background: "var(--accent)",
-                color: "#fff",
-                fontWeight: 600,
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              Analyze All ({stagedFiles.length} files)
-            </button>
-          )}
-        </section>
-
-        {trendPoints.length >= 2 && <SentimentTrendChart points={trendPoints} />}
+        )}
 
         <section
           style={{
@@ -1346,6 +1309,69 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
         {activeTab === "meetings" && (
           <>
+            <section>
+              <div
+                {...getRootProps()}
+                style={{
+                  border: `2px dashed ${isDragActive ? "var(--accent)" : "var(--border)"}`,
+                  borderRadius: "0.875rem",
+                  padding: "2.15rem 1.95rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                  cursor: "pointer",
+                  background: isDragActive ? "var(--accent-subtle)" : "var(--surface)",
+                  transition: "border-color 0.2s, background 0.2s",
+                }}
+              >
+                <input {...getInputProps()} />
+                <UploadIcon active={isDragActive} />
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.9375rem", color: "var(--foreground)", marginBottom: "0.25rem" }}>
+                    {isDragActive ? "Drop your transcript here" : "Upload a transcript"}
+                  </div>
+                  <div style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>
+                    Drag and drop or click to browse - .txt or .vtt only
+                  </div>
+                </div>
+              </div>
+
+              {globalError && (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.62rem 0.86rem",
+                    borderRadius: "0.5rem",
+                    background: "rgba(248,113,113,0.08)",
+                    border: "1px solid rgba(248,113,113,0.25)",
+                    color: "var(--danger)",
+                    fontSize: "0.84rem",
+                  }}
+                >
+                  {globalError}
+                </div>
+              )}
+
+              {showAnalyzeAll && (
+                <button
+                  onClick={() => void analyzeAll()}
+                  style={{
+                    marginTop: "0.75rem",
+                    width: "100%",
+                    padding: "0.62rem",
+                    borderRadius: "0.62rem",
+                    background: "var(--accent)",
+                    color: "#fff",
+                    fontWeight: 600,
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  Analyze All ({stagedFiles.length} files)
+                </button>
+              )}
+            </section>
             {activeMeetings.length > 0 && (
               <section>
                 <h2
@@ -1434,13 +1460,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         )}
 
         {activeTab === "analysis" && (
-          <ProjectAnalysisPanel
-            meetings={completedMeetingsForAnalysis}
-            decisions={allDecisions}
-            actionItems={allActionItems}
-            sentimentSegments={projectSentimentSegments}
-            issues={projectIssues}
-          />
+          <ErrorBoundary>
+            <ProjectAnalysisPanel
+              meetings={completedMeetingsForAnalysis}
+              decisions={allDecisions}
+              actionItems={allActionItems}
+              sentimentSegments={projectSentimentSegments}
+              issues={projectIssues}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === "actions" && (
@@ -1491,25 +1519,29 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               </button>
             </div>
 
-            <ActionItemsTable
-              rows={sortedActionItems}
-              showMeetingSource
-              meetingMetaById={meetingMetaById}
-              linkedIssueByActionId={linkedIssueByActionId}
-              issueById={issueById}
-              supersededById={supersededLookup}
-              emptyLabel="No action items across meetings yet."
-            />
+            <ErrorBoundary>
+              <ActionItemsTable
+                rows={sortedActionItems}
+                showMeetingSource
+                meetingMetaById={meetingMetaById}
+                linkedIssueByActionId={linkedIssueByActionId}
+                issueById={issueById}
+                supersededById={supersededLookup}
+                emptyLabel="No action items across meetings yet."
+              />
+            </ErrorBoundary>
           </section>
         )}
 
         {activeTab === "issues" && (
-          <IssueTracker
-            issues={projectIssues}
-            mentions={projectIssueMentions}
-            meetingsById={meetingMetaById}
-            issueUrgencyById={issueUrgencyById}
-          />
+          <ErrorBoundary>
+            <IssueTracker
+              issues={projectIssues}
+              mentions={projectIssueMentions}
+              meetingsById={meetingMetaById}
+              issueUrgencyById={issueUrgencyById}
+            />
+          </ErrorBoundary>
         )}
       </main>
 

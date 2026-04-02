@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { TopicTimelineNode, TOPIC_STATUS_STYLES, URGENCY_STYLES } from "@/lib/phase3";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type TopicTimelineProps = {
   topics: TopicTimelineNode[];
@@ -19,18 +20,10 @@ export default function TopicTimeline({ topics }: TopicTimelineProps) {
 
   if (topics.length === 0) {
     return (
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: "0.75rem",
-          padding: "1rem",
-          color: "var(--muted)",
-          background: "var(--surface)",
-          fontSize: "0.9rem",
-        }}
-      >
-        No topics were extracted for this meeting.
-      </div>
+      <EmptyState 
+        title="No topics extracted" 
+        description="No topics were extracted for this meeting." 
+      />
     );
   }
 

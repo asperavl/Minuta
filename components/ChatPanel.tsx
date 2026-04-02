@@ -183,10 +183,11 @@ export default function ChatPanel({
 
   return (
     <div
+      className="chat-panel"
       style={{
         position: "fixed",
         top: 58, // Below header
-        right: isOpen ? 0 : "-400px",
+        right: isOpen ? 0 : "var(--chat-hidden-right, -400px)",
         bottom: 0,
         width: "400px",
         maxWidth: "100vw",

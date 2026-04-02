@@ -73,3 +73,7 @@ next-env.d.ts
 
 check-errors.js
 scripts/*.js
+test_transcripts/*.vtt
+
+
+typescript-errors*.txt

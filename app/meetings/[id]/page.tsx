@@ -12,6 +12,8 @@ import ActionItemsTable from "@/components/ActionItemsTable";
 import SentimentDashboard from "@/components/SentimentDashboard";
 import TopicTimeline from "@/components/TopicTimeline";
 import ChatPanel from "@/components/ChatPanel";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ExtractionModel,
   IssueMentionModel,
@@ -559,17 +561,38 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
 
   if (loading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "var(--background)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--muted)",
-        }}
-      >
-        Loading meeting...
+      <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0.65rem 2rem",
+            minHeight: "60px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--surface)",
+          }}
+        >
+          <Skeleton className="h-6 w-48" />
+        </header>
+        <main
+          style={{
+            flex: 1,
+            maxWidth: "1040px",
+            width: "100%",
+            margin: "0 auto",
+            padding: "2.2rem 2rem 2.6rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.2rem",
+          }}
+        >
+          <Skeleton className="h-24 w-full rounded-xl mb-4" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+             <Skeleton className="h-64 rounded-xl" />
+             <Skeleton className="h-64 rounded-xl" />
+          </div>
+        </main>
       </div>
     );
   }
@@ -849,24 +872,30 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
               </table>
             </div>
 
-            <ActionItemsTable
-              rows={actionItems}
-              linkedIssueByActionId={linkedIssueByActionId}
-              issueById={issueById}
-              supersededById={supersededLookup}
-              emptyLabel="No action items extracted for this meeting."
-            />
+            <ErrorBoundary>
+              <ActionItemsTable
+                rows={actionItems}
+                linkedIssueByActionId={linkedIssueByActionId}
+                issueById={issueById}
+                supersededById={supersededLookup}
+                emptyLabel="No action items extracted for this meeting."
+              />
+            </ErrorBoundary>
           </div>
         )}
 
         {activeTab === "sentiment" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            <SentimentDashboard segments={sentimentSegments} speakerObservations={summary.speaker_observations} />
+            <ErrorBoundary>
+              <SentimentDashboard segments={sentimentSegments} speakerObservations={summary.speaker_observations} />
+            </ErrorBoundary>
             <div>
               <div style={{ marginBottom: "1rem" }}>
                 <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "var(--foreground)" }}>Topic Timeline</h3>
               </div>
-              <TopicTimeline topics={summary.topics} />
+              <ErrorBoundary>
+                <TopicTimeline topics={summary.topics} />
+              </ErrorBoundary>
             </div>
           </div>
         )}

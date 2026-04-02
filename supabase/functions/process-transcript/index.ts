@@ -482,8 +482,8 @@ The JSON must contain exactly these keys:
     "segments": [
       {
         "segment_index": <0-based integer>,
-        "speaker": "<dominant speaker name or 'Multiple'>",
-        "text_excerpt": "<first 150 characters of segment>",
+        "speaker": "<exact name of the speaker - NEVER use 'Multiple'>",
+        "text_excerpt": "<verbatim 1-2 sentences of their exact utterance>",
         "sentiment_label": "positive | neutral | conflict | frustrated | uncertain | enthusiastic",
         "sentiment_score": <float -1.0 to 1.0>,
         "start_time": "<timestamp if available from VTT, otherwise null>"
@@ -492,7 +492,7 @@ The JSON must contain exactly these keys:
     "speaker_observations": [
       {
         "speaker": "<name>",
-        "observation": "<one sentence describing this speaker's overall tone across the whole meeting>",
+        "observation": "<specific observation about this speaker's emotional behavior (e.g. 'defensive when challenged', 'frequently uncertain')>",
         "average_score": <float>
       }
     ]
@@ -505,16 +505,17 @@ Rules:
 - owner: use Unassigned if no person was named — never guess
 - due_date: use Not specified if no date was mentioned — never infer
 - speaker_breakdown percentages must sum to 100
-- Divide transcript into natural segments of 15-20 dialogue lines each for sentiment
+- SPEAKER-LEVEL SALIENCE EXTRACTION: Do NOT arbitrarily chunk the transcript into 15-20 lines. Scan the transcript chronologically to find 10-20 specific emotional moments.
+- Extract individual utterances where a specific speaker exhibits a clear emotional shift (frustration, excitement, conflict, uncertainty, or notably positive sentiment).
 - SENTIMENT CALIBRATION (CRITICAL):
-  - Do NOT average emotion out to 'neutral'. Grade the segment based on the single most intense emotional *peak* (Peak-Hold rule).
-  - Explicit bounds: Exclamations of distress ("oh no", "yikes", "shoot", "this is broken") MUST be labeled 'frustrated' or 'conflict' with a negative score (-0.5 to -1.0).
-  - 'neutral' (0.0) is strictly for purely informational statements with zero emotional charge.
+  - Pin the sentiment to the EXACT speaker who said it. 
+  - Do not average out emotions. Exclamations of distress MUST be labeled 'frustrated' or 'conflict' with a negative score.
+  - 'neutral' (0.0) is strictly for purely informational statements. Extract neutral baseline points sparingly; focus heavily on the emotionally charged utterances.
   - 'uncertain' (-0.2 to -0.4) is for hesitation ("umm", "I don't know").
   - Few-Shot Examples:
-    - "Oh no, the deployment failed again." -> Label: frustrated, Score: -0.8
-    - "I'll push the code up later today." -> Label: neutral, Score: 0.0
-    - "I'm not sure if that will work, maybe?" -> Label: uncertain, Score: -0.3
+    - Speaker A: "Oh no, the deployment failed again." -> Speaker: Speaker A, Label: frustrated, Score: -0.8
+    - Speaker B: "I'll push the code up later today." -> Speaker: Speaker B, Label: neutral, Score: 0.0
+    - Speaker C: "I'm not sure if that will work, maybe?" -> Speaker: Speaker C, Label: uncertain, Score: -0.3
 - temperature is 0 — output must be precise and consistent
 - The topics array must include every issue-level discussion (bugs, blockers, incidents, major risks, major feature requests, explicit closures/reopens)
 - Do not collapse separate issue-level discussions into one topic

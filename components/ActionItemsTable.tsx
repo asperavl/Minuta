@@ -8,6 +8,7 @@ import {
   LinkedIssueMatch,
   URGENCY_STYLES,
 } from "@/lib/phase3";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const UNVERIFIED_WARNING =
   "No direct supporting quote was found. Please review this item manually before acting on it.";
@@ -65,18 +66,10 @@ export default function ActionItemsTable({
 
   if (rows.length === 0) {
     return (
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: "0.75rem",
-          padding: "1rem",
-          background: "var(--surface)",
-          color: "var(--muted)",
-          fontSize: "0.9rem",
-        }}
-      >
-        {emptyLabel}
-      </div>
+      <EmptyState 
+        title="No Action Items" 
+        description={emptyLabel} 
+      />
     );
   }
 

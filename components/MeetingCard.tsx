@@ -575,3 +575,43 @@ function TrashIcon() {
     </svg>
   );
 }
+
+export function MeetingCardSkeleton() {
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "0.875rem",
+        padding: "1.25rem 1.5rem",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.875rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div className="animate-pulse rounded-md bg-muted h-5 w-48" />
+          <div className="animate-pulse rounded-md bg-muted h-4 w-32" />
+        </div>
+        <div className="animate-pulse bg-muted h-6 w-16 rounded-full" />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.875rem" }}>
+         <div className="animate-pulse rounded-md bg-muted h-4 w-full" />
+         <div className="animate-pulse rounded-md bg-muted h-4 w-5/6" />
+         <div className="animate-pulse rounded-md bg-muted h-4 w-4/6" />
+      </div>
+      <div style={{ display: "flex", gap: "1.25rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+           <div className="animate-pulse rounded-md bg-muted h-5 w-8" />
+           <div className="animate-pulse rounded-md bg-muted h-3 w-12" />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+           <div className="animate-pulse rounded-md bg-muted h-5 w-8" />
+           <div className="animate-pulse rounded-md bg-muted h-3 w-16" />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+           <div className="animate-pulse rounded-md bg-muted h-5 w-8" />
+           <div className="animate-pulse rounded-md bg-muted h-3 w-10" />
+        </div>
+      </div>
+    </div>
+  );
+}

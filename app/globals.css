@@ -172,3 +172,15 @@ body {
     @apply font-sans;
   }
 }
+
+/* Base custom utility classes for responsive behavior */
+@media (max-width: 768px) {
+  .chat-panel {
+    top: 0 !important;
+    width: 100vw !important;
+    --chat-hidden-right: -100vw !important;
+  }
+  .project-main {
+    margin-right: auto !important;
+  }
+}

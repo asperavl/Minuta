@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { IssueMentionModel, IssueModel } from "@/lib/phase3";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type MeetingMeta = {
   id: string;
@@ -277,7 +278,10 @@ function IssueSection({
       <h3 style={{ margin: "0 0 0.7rem", color: "var(--foreground)", fontSize: "0.93rem" }}>{title}</h3>
 
       {issues.length === 0 ? (
-        <div style={{ color: "var(--muted)", fontSize: "0.84rem" }}>No issues in this section.</div>
+        <EmptyState 
+          title="No Issues" 
+          description="No issues in this section." 
+        />
       ) : (
         <div style={{ display: "grid", gap: "0.72rem" }}>
           {issues.map((issue) => {

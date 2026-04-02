@@ -19,6 +19,7 @@ import {
   normalizeSentimentSegments,
   sentimentLabelForBadge,
 } from "@/lib/phase3";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const SENTIMENT_SEQUENCE: SentimentLabel[] = [
   "positive",
@@ -180,18 +181,10 @@ export default function SentimentDashboard({
 
   if (normalizedSegments.length === 0) {
     return (
-      <div
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: "0.75rem",
-          padding: "1rem",
-          background: "var(--surface)",
-          color: "var(--muted)",
-          fontSize: "0.9rem",
-        }}
-      >
-        No sentiment segments are available for this meeting.
-      </div>
+      <EmptyState 
+        title="No Sentiment Data" 
+        description="No sentiment segments are available for this meeting." 
+      />
     );
   }
 

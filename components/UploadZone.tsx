@@ -261,7 +261,7 @@ export default function UploadZone({ projectId, onMeetingReady }: UploadZoneProp
             Drag and drop or click to browse - .txt or .vtt only
           </div>
           <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.25rem" }}>
-            Minimum 300 words required
+            Any length supported
           </div>
         </div>
       </div>

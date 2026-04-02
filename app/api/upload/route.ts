@@ -62,12 +62,7 @@ export async function POST(request: NextRequest) {
   const parsed = parseTranscript(content, file.name)
 
   // ── Validate word count ─────────────────────────────────────────────────────
-  if (parsed.wordCount < 300) {
-    return NextResponse.json(
-      { error: 'This transcript is too short for analysis. Minimum 300 words required.' },
-      { status: 400 }
-    )
-  }
+  // (Word count limit removed to allow testing small files and minor meetings)
 
   // ── Verify project belongs to this user ─────────────────────────────────────
   const supabase = createSupabaseServiceClient()
